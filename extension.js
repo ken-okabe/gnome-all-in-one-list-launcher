@@ -12,6 +12,230 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
+// --- Improved Custom Tooltip Class and Helper ---
+const Tooltip = GObject.registerClass(
+    class Tooltip extends St.Label {
+        _init() {
+            super._init({
+                style_class: 'tooltip',
+                style: `
+                    background-color: rgba(0, 0, 0, 0.8);
+                    color: white;
+                    padding: 6px 10px;
+                    border-radius: 5px;
+                    font-size: 14px;
+                    font-weight: 500;
+                    opacity: 0;
+                    pointer-events: none;
+                    z-index: 1000;
+                `,
+                visible: false
+            });
+            Main.uiGroup.add_child(this);
+            this._isDestroyed = false;
+            this._isVisible = false;
+        }
+
+        showTooltip(text, sourceActor) {
+            if (this._isDestroyed) return;
+
+            this.set_text(text);
+            this.visible = true; // Make visible first to get correct dimensions
+
+            // Force a layout to get accurate dimensions
+            this.get_theme_node().get_content_box(this.get_allocation_box());
+
+            // Position tooltip near the source actor
+            const [stageX, stageY] = sourceActor.get_transformed_position();
+            const [actorWidth, actorHeight] = sourceActor.get_size();
+            const [tooltipWidth, tooltipHeight] = this.get_size();
+
+            // Check if the source actor is in the top panel
+            const isInTopPanel = this._isActorInTopPanel(sourceActor);
+
+            // Center horizontally above/below the source actor
+            const x = Math.max(0, Math.min(
+                stageX + actorWidth / 2 - tooltipWidth / 2,
+                global.stage.width - tooltipWidth
+            ));
+
+            let y;
+            if (isInTopPanel) {
+                // Position tooltip below the panel icon with some spacing
+                y = Math.min(
+                    stageY + actorHeight + 8,
+                    global.stage.height - tooltipHeight
+                );
+            } else {
+                // Position tooltip above the source actor (original behavior for popup menu items)
+                y = Math.max(0, stageY - tooltipHeight - 5);
+            }
+
+            this.set_position(x, y);
+            this._isVisible = true;
+
+            this.ease({
+                opacity: 255,
+                duration: 200,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+            });
+        }
+
+        _isActorInTopPanel(actor) {
+            // Check if the actor is a child of the top panel
+            let parent = actor.get_parent();
+            while (parent) {
+                if (parent === Main.panel) {
+                    return true;
+                }
+                // Also check if it's in any of the panel's boxes
+                if (parent === Main.panel._leftBox ||
+                    parent === Main.panel._centerBox ||
+                    parent === Main.panel._rightBox) {
+                    return true;
+                }
+                parent = parent.get_parent();
+            }
+            return false;
+        }
+
+        hideTooltip() {
+            if (this._isDestroyed || !this._isVisible) return;
+
+            this._isVisible = false;
+            this.ease({
+                opacity: 0,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    if (!this._isDestroyed && !this._isVisible) {
+                        this.visible = false;
+                    }
+                }
+            });
+        }
+
+        destroy() {
+            if (this._isDestroyed) return;
+
+            this._isDestroyed = true;
+            this._isVisible = false;
+
+            // Stop any ongoing animations
+            this.remove_all_transitions();
+
+            // Hide immediately
+            this.visible = false;
+            this.opacity = 0;
+
+            // Remove from UI group
+            if (this.get_parent()) {
+                this.get_parent().remove_child(this);
+            }
+
+            super.destroy();
+        }
+    });
+
+function addTooltip(actor, text, delay = 500) {
+    let tooltip = null;
+    let showTimeout = null;
+    let hideTimeout = null;
+    let isHovering = false;
+
+    const enterHandler = actor.connect('enter-event', () => {
+        isHovering = true;
+
+        // Clear any existing hide timeout
+        if (hideTimeout) {
+            GLib.source_remove(hideTimeout);
+            hideTimeout = null;
+        }
+
+        // Clear any existing show timeout
+        if (showTimeout) {
+            GLib.source_remove(showTimeout);
+            showTimeout = null;
+        }
+
+        showTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            if (isHovering && !tooltip) {
+                tooltip = new Tooltip();
+            }
+            if (tooltip && !tooltip._isDestroyed && isHovering) {
+                tooltip.showTooltip(text, actor);
+            }
+            showTimeout = null;
+            return GLib.SOURCE_REMOVE;
+        });
+    });
+
+    const leaveHandler = actor.connect('leave-event', () => {
+        isHovering = false;
+
+        // Clear any pending show timeout
+        if (showTimeout) {
+            GLib.source_remove(showTimeout);
+            showTimeout = null;
+        }
+
+        if (tooltip && !tooltip._isDestroyed) {
+            // Hide immediately, no delay
+            tooltip.hideTooltip();
+
+            // Clean up tooltip after a short delay
+            hideTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+                if (tooltip && !tooltip._isDestroyed) {
+                    tooltip.destroy();
+                    tooltip = null;
+                }
+                hideTimeout = null;
+                return GLib.SOURCE_REMOVE;
+            });
+        }
+    });
+
+    // Enhanced cleanup function
+    actor._tooltipCleanup = () => {
+        isHovering = false;
+
+        // Disconnect signal handlers
+        if (enterHandler) {
+            try {
+                actor.disconnect(enterHandler);
+            } catch (e) {
+                // Actor might already be destroyed
+            }
+        }
+        if (leaveHandler) {
+            try {
+                actor.disconnect(leaveHandler);
+            } catch (e) {
+                // Actor might already be destroyed
+            }
+        }
+
+        // Clear timeouts
+        if (showTimeout) {
+            GLib.source_remove(showTimeout);
+            showTimeout = null;
+        }
+        if (hideTimeout) {
+            GLib.source_remove(hideTimeout);
+            hideTimeout = null;
+        }
+
+        // Destroy tooltip immediately
+        if (tooltip) {
+            tooltip.destroy();
+            tooltip = null;
+        }
+
+        // Remove cleanup function reference
+        delete actor._tooltipCleanup;
+    };
+}
+
 // --- Model ---
 const WindowModel = GObject.registerClass({
     Signals: { 'updated': {} },
@@ -90,7 +314,7 @@ const WindowModel = GObject.registerClass({
     }
 });
 
-// --- View 2 (WindowIconList) ---
+// --- View 2 (WindowIconList) - Fixed Version ---
 const WindowIconList = GObject.registerClass(
     class WindowIconList extends GObject.Object {
         _init(params) {
@@ -102,27 +326,67 @@ const WindowIconList = GObject.registerClass(
             this.container = new St.BoxLayout({ name: 'WindowIconListContainer' });
             this.wrapperButton.add_child(this.container);
             this._updatedConnection = this._model.connect('updated', () => this._redraw());
+            this._iconButtons = []; // Track all icon buttons for cleanup
             this._redraw();
         }
+
         _redraw() {
+            // Clean up existing tooltips before destroying children
+            this._cleanupTooltips();
             this.container.destroy_all_children();
+            this._iconButtons = []; // Reset the tracking array
+
             const sortedApps = this._model.getData();
             for (const group of sortedApps) {
                 for (const win of group.windows) {
                     const button = this._createIconButton(group.app, win);
                     this.container.add_child(button);
+                    this._iconButtons.push(button); // Track this button
                 }
             }
         }
+
         _createIconButton(app, metaWindow) {
             const icon = new St.Icon({ gicon: app.get_icon(), icon_size: this._iconSize });
-            const button = new St.Button({ child: icon, style_class: 'panel-button', track_hover: true, reactive: true });
+            const button = new St.Button({
+                child: icon,
+                style_class: 'panel-button',
+                track_hover: true,
+                reactive: true
+            });
+
+            // Add custom tooltip with app name - 迅速に表示（遅延なし）
+            addTooltip(button, app.get_name(), 0);
+
             button.connect('clicked', () => { metaWindow.activate(global.get_current_time()); });
             return button;
         }
+
+        _cleanupTooltips() {
+            // Clean up tooltips from all tracked buttons
+            this._iconButtons.forEach(button => {
+                if (button && button._tooltipCleanup) {
+                    button._tooltipCleanup();
+                }
+            });
+        }
+
         destroy() {
-            if (this._updatedConnection) this._model.disconnect(this._updatedConnection);
-            this.wrapperButton.destroy();
+            // Clean up tooltips before destroying
+            this._cleanupTooltips();
+
+            if (this._updatedConnection) {
+                this._model.disconnect(this._updatedConnection);
+                this._updatedConnection = null;
+            }
+
+            // Clear the tracking array
+            this._iconButtons = [];
+
+            if (this.wrapperButton) {
+                this.wrapperButton.destroy();
+                this.wrapperButton = null;
+            }
         }
     });
 
@@ -133,6 +397,7 @@ const AppMenuButton = GObject.registerClass(
             super._init(0.0, 'All Windows Menu');
             this._model = params.model;
             this._extension = params.extension;
+            this._tooltipActors = []; // ツールチップを持つアクターを追跡
 
             this._settings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
             this._settingsChangedId = this._settings.connect('changed::favorite-apps', () => this._redraw());
@@ -140,11 +405,34 @@ const AppMenuButton = GObject.registerClass(
             this.add_child(new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' }));
             this.menu.actor.add_style_class_name('compact-window-list');
 
+            // メニューが閉じられた時のクリーンアップ
+            this._menuClosedId = this.menu.connect('menu-closed', () => {
+                this._cleanupAllTooltips();
+            });
+
             this._updatedConnection = this._model.connect('updated', () => this._redraw());
             this._redraw();
         }
 
+        _cleanupAllTooltips() {
+            // 全てのツールチップアクターをクリーンアップ
+            this._tooltipActors.forEach(actor => {
+                if (actor && actor._tooltipCleanup) {
+                    actor._tooltipCleanup();
+                }
+            });
+            this._tooltipActors = [];
+        }
+
+        _addTooltipActor(actor) {
+            // ツールチップを持つアクターを追跡リストに追加
+            this._tooltipActors.push(actor);
+        }
+
         _redraw() {
+            // 既存のツールチップをクリーンアップ
+            this._cleanupAllTooltips();
+
             this.menu.removeAll();
             const favorites = this._settings.get_strv('favorite-apps');
             const sortedApps = this._model.getData();
@@ -164,24 +452,53 @@ const AppMenuButton = GObject.registerClass(
                     if (!app) continue;
 
                     const icon = new St.Icon({ gicon: app.get_icon(), icon_size: 28 });
-                    const button = new St.Button({ child: icon, style_class: 'popup-menu-item', track_hover: true, can_focus: true, accessible_name: app.get_name() });
+                    const button = new St.Button({
+                        child: icon,
+                        style_class: 'popup-menu-item',
+                        track_hover: true,
+                        can_focus: true,
+                        accessible_name: app.get_name()
+                    });
 
                     const normalStyle = 'background-color: transparent; padding: 4px; border-radius: 4px;';
                     const hoverStyle = 'background-color: rgba(255, 255, 255, 0.1); padding: 4px; border-radius: 4px;';
                     button.set_style(normalStyle);
 
+                    // ツールチップを追加し、追跡リストに登録
+                    addTooltip(button, app.get_name(), 0);
+                    this._addTooltipActor(button);
+
                     button.connect('enter-event', () => button.set_style(hoverStyle));
                     button.connect('leave-event', () => button.set_style(normalStyle));
+
                     button.connect('clicked', () => {
-                        app.activate();
-                        this.menu.close();
+                        this._cleanupAllTooltips(); // クリック時にツールチップをクリーンアップ
+                        try {
+                            app.launch(0, [], null);
+                            this.menu.close();
+                        } catch (error) {
+                            try {
+                                const context = global.create_app_launch_context(
+                                    global.get_current_time(),
+                                    global.workspace_manager.get_active_workspace().index
+                                );
+                                app.launch(0, [], context);
+                                this.menu.close();
+                            } catch (contextError) {
+                                console.error(`[AllWindows] Fallback to activate()`);
+                                app.activate();
+                                this.menu.close();
+                            }
+                        }
                     });
+
                     favoritesBox.add_child(button);
                 }
 
                 const settingsIcon = new St.Icon({ icon_name: 'preferences-system-symbolic', icon_size: 16, style_class: 'popup-menu-icon' });
                 const settingsButton = new St.Button({ child: settingsIcon, style_class: 'popup-menu-item', accessible_name: _("Settings"), style: 'padding: 4px; border-radius: 4px;' });
                 settingsButton.connect('clicked', () => {
+                    this._cleanupAllTooltips();
                     this._extension.openPreferences();
                     this.menu.close();
                 });
@@ -217,19 +534,27 @@ const AppMenuButton = GObject.registerClass(
                     const appInfoButton = new St.Button({ child: appInfoBox, x_expand: true, style_class: 'popup-menu-item' });
 
                     appInfoButton.connect('clicked', () => {
+                        this._cleanupAllTooltips();
                         group.windows.forEach(metaWindow => metaWindow.activate(global.get_current_time()));
                         this.menu.close();
                     });
 
                     const rightButtonBox = new St.BoxLayout({ style: 'spacing: 4px;' });
 
-                    // isAppLaunchableのチェックを統合
                     if (isAppLaunchable(group.app)) {
                         const favoriteIconName = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
                         const favoriteTooltip = isFavorite ? _("Remove from favorites") : _("Add to favorites");
                         const favoriteIcon = new St.Icon({ icon_name: favoriteIconName, icon_size: 16, style_class: 'popup-menu-icon' });
                         const favoriteButton = new St.Button({ child: favoriteIcon, style_class: 'popup-menu-item', accessible_name: favoriteTooltip, style: 'padding: 4px; border-radius: 4px;' });
-                        favoriteButton.connect('clicked', () => { this._toggleFavorite(appId); });
+
+                        // お気に入りボタンにもツールチップを追加し、追跡
+                        addTooltip(favoriteButton, favoriteTooltip, 0);
+                        this._addTooltipActor(favoriteButton);
+
+                        favoriteButton.connect('clicked', () => {
+                            this._cleanupAllTooltips();
+                            this._toggleFavorite(appId);
+                        });
                         rightButtonBox.add_child(favoriteButton);
                     }
 
@@ -240,13 +565,157 @@ const AppMenuButton = GObject.registerClass(
                     this.menu.addMenuItem(appHeader);
 
                     for (const metaWindow of group.windows) {
-                        const item = new PopupMenu.PopupMenuItem(ellipsizedWindowTitle(metaWindow));
+                        const item = new PopupMenu.PopupBaseMenuItem({
+                            reactive: true,
+                            style_class: 'popup-menu-item'
+                        });
                         item.actor.style = 'padding-left: 38px;';
-                        item.connect('activate', () => metaWindow.activate(global.get_current_time()));
+
+                        const contentBox = new St.BoxLayout({
+                            x_expand: true,
+                            y_align: Clutter.ActorAlign.CENTER
+                        });
+                        item.add_child(contentBox);
+
+                        // Main clickable area (title)
+                        const titleBox = new St.BoxLayout({
+                            x_expand: true,
+                            y_align: Clutter.ActorAlign.CENTER,
+                            reactive: true,
+                            track_hover: true,
+                            style_class: 'window-title-area'
+                        });
+
+                        const titleLabel = new St.Label({
+                            text: ellipsizedWindowTitle(metaWindow),
+                            y_align: Clutter.ActorAlign.CENTER,
+                            x_expand: true
+                        });
+                        titleBox.add_child(titleLabel);
+
+                        // Close button (initially hidden)
+                        const closeIcon = new St.Icon({
+                            icon_name: 'window-close-symbolic',
+                            icon_size: 14,
+                            style_class: 'popup-menu-icon',
+                            opacity: 0
+                        });
+
+                        const closeButton = new St.Button({
+                            child: closeIcon,
+                            style_class: 'window-close-button',
+                            accessible_name: _("Close Window"),
+                            style: `
+                        padding: 3px 5px; 
+                        border-radius: 3px; 
+                        margin-left: 4px;
+                        min-width: 18px;
+                        transition-duration: 150ms;
+                        background-color: transparent;
+                    `,
+                            opacity: 0,
+                            reactive: true,
+                            track_hover: true
+                        });
+
+                        // Add hover effects for smooth appearance
+                        const showCloseButton = () => {
+                            closeButton.ease({
+                                opacity: 255,
+                                duration: 150,
+                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                            });
+                            closeIcon.ease({
+                                opacity: 255,
+                                duration: 150,
+                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                            });
+                        };
+
+                        const hideCloseButton = () => {
+                            closeButton.ease({
+                                opacity: 0,
+                                duration: 150,
+                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                            });
+                            closeIcon.ease({
+                                opacity: 0,
+                                duration: 150,
+                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
+                            });
+                        };
+
+                        // Close button hover effects (red tint)
+                        closeButton.connect('enter-event', () => {
+                            showCloseButton();
+                            closeButton.set_style(`
+                        padding: 3px 5px; 
+                        border-radius: 3px; 
+                        margin-left: 4px;
+                        min-width: 18px;
+                        transition-duration: 150ms;
+                        background-color: rgba(255, 100, 100, 0.2);
+                    `);
+                            closeIcon.set_style('color: #ff6666;');
+                            return Clutter.EVENT_STOP;
+                        });
+
+                        closeButton.connect('leave-event', () => {
+                            closeButton.set_style(`
+                        padding: 3px 5px; 
+                        border-radius: 3px; 
+                        margin-left: 4px;
+                        min-width: 18px;
+                        transition-duration: 150ms;
+                        background-color: transparent;
+                    `);
+                            closeIcon.set_style('color: inherit;');
+                            return Clutter.EVENT_PROPAGATE;
+                        });
+
+                        // Hover events for the entire item
+                        item.connect('enter-event', showCloseButton);
+                        item.connect('leave-event', hideCloseButton);
+
+                        // Title click activation
+                        titleBox.connect('button-press-event', (actor, event) => {
+                            if (event.get_button() === 1) {
+                                this._cleanupAllTooltips();
+                                metaWindow.activate(global.get_current_time());
+                                this.menu.close();
+                                return Clutter.EVENT_STOP;
+                            }
+                            return Clutter.EVENT_PROPAGATE;
+                        });
+
+                        // Close button functionality
+                        closeButton.connect('clicked', (actor, event) => {
+                            this._cleanupAllTooltips();
+                            metaWindow.delete(global.get_current_time());
+                            this.menu.close();
+                            return Clutter.EVENT_STOP;
+                        });
+
+                        closeButton.connect('enter-event', () => {
+                            showCloseButton();
+                            closeButton.set_style(`
+                        padding: 3px 5px; 
+                        border-radius: 3px; 
+                        margin-left: 4px;
+                        min-width: 18px;
+                        transition-duration: 150ms;
+                        background-color: rgba(255, 100, 100, 0.2);
+                    `);
+                            closeIcon.set_style('color: #ff6666;');
+                            return Clutter.EVENT_STOP;
+                        });
+
+                        contentBox.add_child(titleBox);
+                        contentBox.add_child(closeButton);
                         this.menu.addMenuItem(item);
                     }
 
-                    // Add separator line after each group (also added after the last group, but it's acceptable)
+                    // Add separator line after each group
                     const separator = new PopupMenu.PopupSeparatorMenuItem();
                     separator.actor.set_style(separatorStyle);
                     this.menu.addMenuItem(separator);
@@ -269,6 +738,14 @@ const AppMenuButton = GObject.registerClass(
         }
 
         destroy() {
+            // すべてのツールチップをクリーンアップ
+            this._cleanupAllTooltips();
+
+            if (this._menuClosedId) {
+                this.menu.disconnect(this._menuClosedId);
+                this._menuClosedId = null;
+            }
+
             if (this._settings && this._settingsChangedId) {
                 this._settings.disconnect(this._settingsChangedId);
                 this._settings = null;
@@ -280,7 +757,6 @@ const AppMenuButton = GObject.registerClass(
             super.destroy();
         }
     });
-
 // --- Helper functions ---
 function ellipsizeString(s, l) { if (s.length > l) return s.substring(0, l) + '...'; return s; }
 function ellipsizedWindowTitle(metaWindow) { return ellipsizeString(metaWindow.get_title() || "-", 100); }
