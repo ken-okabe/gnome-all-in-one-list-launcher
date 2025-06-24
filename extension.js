@@ -614,8 +614,14 @@ export default class AllWindowsExtension extends Extension {
         if (!app) {
             return false;
         }
-        // 【修正】app.get_app_info() を呼び出し、Gio.AppInfoオブジェクトを取得してから should_show() を実行する
-        return app.get_app_info().should_show();
+        
+        const appInfo = app.get_app_info();
+        // 【修正】appInfoがnullの場合を考慮するnullチェックを追加
+        if (!appInfo) {
+            return false;
+        }
+
+        return appInfo.should_show();
     }
     // --- ▲▲▲ 修正箇所ここまで ▲▲▲ ---
 
