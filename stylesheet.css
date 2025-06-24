@@ -1,4 +1,18 @@
-/* お気に入りバーのボタンの基本スタイル */
+/* ======================================================================
+// stylesheet.css (全体)
+// ====================================================================== */
+
+/* お気に入りバー */
+.favorites-bar-container {
+    gap: 8px;
+    /* JSの .spacing = 8 の代替 */
+}
+
+.favorite-bar-app-icon {
+    icon-size: 28px;
+    /* JSの icon_size: 28 の代替 */
+}
+
 .favorite-button {
     padding: 4px;
     border-radius: 6px;
@@ -13,7 +27,41 @@
     background-color: rgba(255, 255, 255, 0.25);
 }
 
-/* 閉じるボタンの表示制御 */
+/* ポップアップメニューのウィンドウリスト */
+.window-list-header-icon {
+    margin-right: 8px;
+    icon-size: 20px;
+    /* JSの icon_size: 20 の代替 */
+}
+
+.window-list-header-title {
+    font-weight: bold;
+}
+
+.window-list-item-hbox {
+    padding-left: 20px;
+    /* JSのインラインスタイルの代替 */
+}
+
+/* 右端のアクションボタン(閉じる/お気に入り) */
+.item-actions-container {
+    gap: 4px;
+    /* ボタン間のスペースを一元管理 */
+}
+
+.favorite-star-button {
+    transition: color 150ms ease-out;
+    /* margin-left は .item-actions-container の gap で管理するため削除 */
+}
+
+.favorite-star-button:hover {
+    color: #E5A50A;
+}
+
+.favorite-star-button .popup-menu-icon {
+    icon-size: 16px;
+}
+
 .window-close-button {
     width: 22px;
     height: 22px;
@@ -43,34 +91,17 @@
     background-color: rgba(192, 28, 40, 0.2);
 }
 
-/* ヘッダーのスタイル調整 */
-.window-list-header-icon {
-    margin-right: 8px;
-}
-
-.window-list-header-title {
-    font-weight: bold;
-}
-
-/* ボタン間のスペース調整 */
-.favorite-star-button {
-    margin-left: 4px;
-    transition: color 150ms ease-out;
-}
-
-.favorite-star-button:hover {
-    color: #E5A50A;
-}
-
-.favorite-star-button .popup-menu-icon {
+/* パネル上のアイコン */
+.panel-main-icon {
     icon-size: 16px;
+    /* 標準的なパネルアイコンサイズ */
 }
 
-/* パネル上のアイコンリストのスタイル */
+.panel-window-icon {
+    icon-size: 20px;
+    /* JSの icon_size: 20 の代替 */
+}
+
 .window-icon-list-container {
     spacing: 2px;
-}
-
-.window-icon-list-container .system-status-icon {
-    icon-size: 20px;
 }

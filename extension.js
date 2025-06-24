@@ -382,8 +382,13 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
         }
     }
 
+    // ======================================================================
+    // AppMenuButton._updateWindowsSection メソッド (全体)
+    // このブロックで既存のメソッドを完全に置き換えてください。
+    // ======================================================================
     _updateWindowsSection(windowGroups, favoriteAppIds) {
         if (this._isDestroyed) return;
+
         let lastFocusedId = null;
         if (this._lastFocusedItem && !this._lastFocusedItem.is_destroyed) {
             const itemData = this._lastFocusedItem._itemData;
@@ -394,23 +399,41 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
                 lastFocusedId = `win:${itemData.get_id()}`;
             }
         }
+
         this._windowsContainer.forEach(child => child.destroy());
         this._windowsContainer = [];
+
         if (!windowGroups || windowGroups.length === 0) {
             const noWindowsItem = new PopupMenu.PopupMenuItem(_("No open windows"), { reactive: false });
             this.menu.addMenuItem(noWindowsItem);
             this._windowsContainer.push(noWindowsItem);
         } else {
             const sortedGroups = this._extension._sortWindowGroups([...windowGroups], favoriteAppIds);
+
             for (const group of sortedGroups) {
-                const headerItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true });
+                // --- ▼▼▼ ヘッダー項目の実装 ▼▼▼ ---
+                const headerItem = new NonClosingPopupBaseMenuItem({
+                    reactive: true,
+                    can_focus: true,
+                    style_class: 'window-list-item' // CSSホバー効果のためクラスを追加
+                });
                 headerItem._itemData = group;
                 headerItem._itemType = 'group';
+
                 const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER });
                 headerItem.add_child(hbox);
+
                 hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20 }));
                 hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER }));
-                hbox.add_child(new St.Widget({ x_expand: true }));
+                hbox.add_child(new St.Widget({ x_expand: true })); // スペーサー
+
+                // 【変更点】閉じるボタンを追加
+                const groupCloseButton = new St.Button({
+                    style_class: 'window-close-button',
+                    child: new St.Icon({ icon_name: 'window-close-symbolic' })
+                });
+                groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
+                hbox.add_child(groupCloseButton);
 
                 if (this._extension._isAppLaunchable(group.app)) {
                     const isFavorite = favoriteAppIds.includes(group.app.get_id());
@@ -424,9 +447,7 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
                     });
                     starButton.connect('clicked', (button, event) => {
                         this._extension._toggleFavorite(group.app.get_id());
-                        if (event) {
-                            event.stop_propagation();
-                        }
+                        if (event) event.stop_propagation();
                         return Clutter.EVENT_STOP;
                     });
                     hbox.add_child(starButton);
@@ -434,23 +455,47 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
 
                 headerItem.connect('custom-activate', () => this._handleWindowActivate(headerItem, group, 'group'));
                 headerItem.connect('custom-close', () => this._handleWindowClose(headerItem, group, 'group'));
+
                 this.menu.addMenuItem(headerItem);
                 this._windowsContainer.push(headerItem);
 
-                const sortedWindows = group.windows.slice().sort((winA, winB) => {
-                    return winA.get_frame_rect().y - winB.get_frame_rect().y;
-                });
+                // --- ▼▼▼ ウィンドウ項目の実装 ▼▼▼ ---
+                const sortedWindows = group.windows.sort((winA, winB) => winA.get_frame_rect().y - winB.get_frame_rect().y);
+
                 for (const metaWindow of sortedWindows) {
-                    const windowItem = new NonClosingPopupMenuItem('    ' + (metaWindow.get_title() || '...'), { reactive: true, can_focus: true });
+                    // 【変更点】レイアウトのため NonClosingPopupBaseMenuItem を使用
+                    const windowItem = new NonClosingPopupBaseMenuItem({
+                        reactive: true,
+                        can_focus: true,
+                        style_class: 'window-list-item' // CSSホバー効果のためクラスを追加
+                    });
                     windowItem._itemData = metaWindow;
                     windowItem._itemType = 'window';
+
+                    // 【変更点】インデントとボタン配置のため BoxLayout を使用
+                    const windowHbox = new St.BoxLayout({ x_expand: true, style: 'padding-left: 20px;' });
+                    windowItem.add_child(windowHbox);
+
+                    windowHbox.add_child(new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER }));
+                    windowHbox.add_child(new St.Widget({ x_expand: true })); // スペーサー
+
+                    // 【変更点】閉じるボタンを追加
+                    const windowCloseButton = new St.Button({
+                        style_class: 'window-close-button',
+                        child: new St.Icon({ icon_name: 'window-close-symbolic' })
+                    });
+                    windowCloseButton.connect('clicked', () => windowItem.emit('custom-close'));
+                    windowHbox.add_child(windowCloseButton);
+
                     windowItem.connect('custom-activate', () => this._handleWindowActivate(windowItem, metaWindow, 'window'));
                     windowItem.connect('custom-close', () => this._handleWindowClose(windowItem, metaWindow, 'window'));
+
                     this.menu.addMenuItem(windowItem);
                     this._windowsContainer.push(windowItem);
                 }
             }
         }
+
         if (lastFocusedId) {
             let itemToFocus = null;
             for (const newItem of this._windowsContainer) {
