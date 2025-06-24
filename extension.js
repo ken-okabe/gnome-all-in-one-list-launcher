@@ -193,6 +193,9 @@ const WindowIconListIndicator = GObject.registerClass(
     });
 
 
+// ======================================================================
+// AppMenuButton クラス (全体)
+// ======================================================================
 const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMenu.Button {
     _init(params) {
         super._init(0.0, 'Timeline Event Network');
@@ -217,39 +220,26 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
 
         this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
 
-        // --- ▼▼▼ 修正箇所 ▼▼▼ ---
-
-        // 1. お気に入りバー（上段）の状態管理 (この部分は変更なし)
         const favoritesStateTimeline = combineLatestWith(
             (favs, selectedIndex) => ({ favs, selectedIndex })
         )(favoritesTimeline)(this._selectedFavoriteIndexTimeline);
 
-        // 2. ウィンドウリスト（下段）の状態管理
-        //    windowsTimeline と favoritesTimeline の両方の変更を購読する必要があるため、ここで結合します。
         const windowSectionDataTimeline = combineLatestWith(
             (windows, favs) => ({ windows, favs })
         )(windowsTimeline)(favoritesTimeline);
 
-        // メニュー構造の初期化と初回描画
         this._initializeMenuStructure();
         this._performInitialDisplay(initialFavorites, this._selectedFavoriteIndexTimeline.at(Now), windowsTimeline.at(Now));
 
-        // 3. UIの更新ロジックを、それぞれの状態Timelineに接続
-
-        // お気に入りバーは favoritesStateTimeline の変更を購読
         favoritesStateTimeline.map(state => {
             if (this._isDestroyed) return;
             this._updateFavoritesSection(state.favs, state.selectedIndex);
         });
 
-        // ウィンドウリストは、新しく作成した windowSectionDataTimeline の変更を購読
         windowSectionDataTimeline.map(({ windows, favs }) => {
             if (this._isDestroyed) return;
-            // これで、お気に入りが変更された時も _updateWindowsSection が呼ばれるようになります。
             this._updateWindowsSection(windows, favs);
         });
-
-        // --- ▲▲▲ 修正完了 ▲▲▲ ---
     }
 
     _flashIcon(color) {
@@ -297,8 +287,6 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
     _handleWindowActivate(actor, item, itemType) {
         this._flashIcon('green');
         this._activateSelection(actor, item, itemType);
-        // メニューを閉じないようにする
-        // this._resetMenuState(); をコメントアウト
     }
 
     _handleWindowClose(actor, item, itemType) {
@@ -413,7 +401,6 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
             this.menu.addMenuItem(noWindowsItem);
             this._windowsContainer.push(noWindowsItem);
         } else {
-            // ★ 一次ソート: お気に入り優先→起動順
             const sortedGroups = this._extension._sortWindowGroups([...windowGroups], favoriteAppIds);
             for (const group of sortedGroups) {
                 const headerItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true });
@@ -424,22 +411,32 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
                 hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20 }));
                 hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER }));
                 hbox.add_child(new St.Widget({ x_expand: true }));
-                const isFavorite = favoriteAppIds.includes(group.app.get_id());
-                const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
-                const starButton = new St.Button({ child: new St.Icon({ icon_name: starIcon, style_class: 'popup-menu-icon' }) });
-                starButton.connect('clicked', (button, event) => {
-                    this._extension._toggleFavorite(group.app.get_id());
-                    if (event) {
-                        event.stop_propagation();
-                    }
-                    return Clutter.EVENT_STOP;
-                });
-                hbox.add_child(starButton);
+
+                if (this._extension._isAppLaunchable(group.app)) {
+                    const isFavorite = favoriteAppIds.includes(group.app.get_id());
+                    const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
+                    const starButton = new St.Button({
+                        style_class: 'favorite-star-button',
+                        child: new St.Icon({
+                            icon_name: starIcon,
+                            style_class: 'popup-menu-icon'
+                        })
+                    });
+                    starButton.connect('clicked', (button, event) => {
+                        this._extension._toggleFavorite(group.app.get_id());
+                        if (event) {
+                            event.stop_propagation();
+                        }
+                        return Clutter.EVENT_STOP;
+                    });
+                    hbox.add_child(starButton);
+                }
+
                 headerItem.connect('custom-activate', () => this._handleWindowActivate(headerItem, group, 'group'));
                 headerItem.connect('custom-close', () => this._handleWindowClose(headerItem, group, 'group'));
                 this.menu.addMenuItem(headerItem);
                 this._windowsContainer.push(headerItem);
-                // ★ グループ内ウィンドウをY座標順でソート
+
                 const sortedWindows = group.windows.slice().sort((winA, winB) => {
                     return winA.get_frame_rect().y - winB.get_frame_rect().y;
                 });
@@ -514,6 +511,9 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
     }
 });
 
+// ======================================================================
+// AllWindowsExtension クラス (全体)
+// ======================================================================
 export default class AllWindowsExtension extends Extension {
     enable() {
         this.settings = this.getSettings();
@@ -564,6 +564,16 @@ export default class AllWindowsExtension extends Extension {
         Main.wm.removeKeybinding(this.openPopupShortcutId);
     }
 
+    // --- ▼▼▼ ここからが修正箇所 ▼▼▼ ---
+    _isAppLaunchable(app) {
+        if (!app) {
+            return false;
+        }
+        // 【修正】app.get_app_info() を呼び出し、Gio.AppInfoオブジェクトを取得してから should_show() を実行する
+        return app.get_app_info().should_show();
+    }
+    // --- ▲▲▲ 修正箇所ここまで ▲▲▲ ---
+
     _buildAndWireUI() {
         const sessionResources = { models: [], listeners: [] };
         const createSettingTimeline = (source, key, type) => {
@@ -606,19 +616,16 @@ export default class AllWindowsExtension extends Extension {
 
         let windowIconListWidget = null;
 
-        // ▼▼▼ combineLatestWithのネストで3つのTimelineを正しく結合
         const combinedWinAndFavs = combineLatestWith(
             (windowGroups, favs) => ({ windowGroups, favs })
         )(windowModel.windowsTimeline)(favoritesTimeline);
         const iconListDataTimeline = combineLatestWith(
             (winFavs, show) => ({ ...winFavs, show })
         )(combinedWinAndFavs)(showWindowIconListTimeline);
-        // ▲▲▲
 
         iconListDataTimeline.map(({ windowGroups, favs, show }) => {
             const { p, r } = mainIconPlacementTimeline.at(Now);
 
-            // 表示設定が false ならウィジェットを破棄
             if (!show) {
                 if (windowIconListWidget) {
                     windowIconListWidget.destroy();
@@ -627,13 +634,11 @@ export default class AllWindowsExtension extends Extension {
                 return;
             }
 
-            // ウィジェットがなければ作成し、パネルに追加
             if (!windowIconListWidget) {
                 windowIconListWidget = new WindowIconListIndicator();
                 Main.panel.addToStatusArea(`${this.uuid}-WindowIconList`, windowIconListWidget, r + 1, p);
             }
 
-            // ソートされたデータでUIを更新
             if (windowIconListWidget && !windowIconListWidget.is_destroyed) {
                 const sortedGroups = this._sortWindowGroups([...windowGroups], favs);
                 windowIconListWidget.update(sortedGroups);
@@ -664,7 +669,6 @@ export default class AllWindowsExtension extends Extension {
         };
     }
 
-    // --- 共通の一次ソート関数 ---
     _sortWindowGroups(windowGroups, favoriteAppIds) {
         const favoriteOrder = new Map(favoriteAppIds.map((id, index) => [id, index]));
         windowGroups.sort((a, b) => {
