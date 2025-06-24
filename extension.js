@@ -382,10 +382,8 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
         }
     }
 
-    // ======================================================================
-    // AppMenuButton._updateWindowsSection メソッド (全体)
-    // このブロックで既存のメソッドを完全に置き換えてください。
-    // ======================================================================
+    // _updateWindowsSection メソッドの修正版
+
     _updateWindowsSection(windowGroups, favoriteAppIds) {
         if (this._isDestroyed) return;
 
@@ -411,30 +409,46 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
             const sortedGroups = this._extension._sortWindowGroups([...windowGroups], favoriteAppIds);
 
             for (const group of sortedGroups) {
-                // --- ▼▼▼ ヘッダー項目の実装 ▼▼▼ ---
+                // --- ▼▼▼ ヘッダー項目の実装（スタイリング改善） ▼▼▼ ---
                 const headerItem = new NonClosingPopupBaseMenuItem({
                     reactive: true,
                     can_focus: true,
-                    style_class: 'window-list-item' // CSSホバー効果のためクラスを追加
+                    style_class: 'window-list-item app-header-item' // CSSクラス追加
                 });
                 headerItem._itemData = group;
                 headerItem._itemType = 'group';
 
-                const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+                const hbox = new St.BoxLayout({
+                    x_expand: true,
+                    y_align: Clutter.ActorAlign.CENTER,
+                    style_class: 'app-header-container' // CSSクラス追加
+                });
                 headerItem.add_child(hbox);
 
-                hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20 }));
-                hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER }));
+                // アイコンにマージンを追加
+                const appIcon = new St.Icon({
+                    gicon: group.app.get_icon(),
+                    icon_size: 20,
+                    style_class: 'app-header-icon' // CSSクラス追加
+                });
+                hbox.add_child(appIcon);
+
+                // アプリ名ラベルにスタイルクラス追加
+                const appLabel = new St.Label({
+                    text: group.app.get_name(),
+                    y_align: Clutter.ActorAlign.CENTER,
+                    style_class: 'app-header-title' // CSSクラス追加
+                });
+                hbox.add_child(appLabel);
+
                 hbox.add_child(new St.Widget({ x_expand: true })); // スペーサー
 
-                // 【変更点】閉じるボタンを追加
-                const groupCloseButton = new St.Button({
-                    style_class: 'window-close-button',
-                    child: new St.Icon({ icon_name: 'window-close-symbolic' })
+                // アクションボタンのコンテナ
+                const actionsContainer = new St.BoxLayout({
+                    style_class: 'item-actions-container'
                 });
-                groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
-                hbox.add_child(groupCloseButton);
 
+                // お気に入り星ボタン
                 if (this._extension._isAppLaunchable(group.app)) {
                     const isFavorite = favoriteAppIds.includes(group.app.get_id());
                     const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
@@ -450,8 +464,18 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
                         if (event) event.stop_propagation();
                         return Clutter.EVENT_STOP;
                     });
-                    hbox.add_child(starButton);
+                    actionsContainer.add_child(starButton);
                 }
+
+                // 閉じるボタン
+                const groupCloseButton = new St.Button({
+                    style_class: 'window-close-button',
+                    child: new St.Icon({ icon_name: 'window-close-symbolic' })
+                });
+                groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
+                actionsContainer.add_child(groupCloseButton);
+
+                hbox.add_child(actionsContainer);
 
                 headerItem.connect('custom-activate', () => this._handleWindowActivate(headerItem, group, 'group'));
                 headerItem.connect('custom-close', () => this._handleWindowClose(headerItem, group, 'group'));
@@ -459,27 +483,35 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
                 this.menu.addMenuItem(headerItem);
                 this._windowsContainer.push(headerItem);
 
-                // --- ▼▼▼ ウィンドウ項目の実装 ▼▼▼ ---
+                // --- ▼▼▼ ウィンドウ項目の実装（スタイリング改善） ▼▼▼ ---
                 const sortedWindows = group.windows.sort((winA, winB) => winA.get_frame_rect().y - winB.get_frame_rect().y);
 
                 for (const metaWindow of sortedWindows) {
-                    // 【変更点】レイアウトのため NonClosingPopupBaseMenuItem を使用
                     const windowItem = new NonClosingPopupBaseMenuItem({
                         reactive: true,
                         can_focus: true,
-                        style_class: 'window-list-item' // CSSホバー効果のためクラスを追加
+                        style_class: 'window-list-item window-item' // CSSクラス追加
                     });
                     windowItem._itemData = metaWindow;
                     windowItem._itemType = 'window';
 
-                    // 【変更点】インデントとボタン配置のため BoxLayout を使用
-                    const windowHbox = new St.BoxLayout({ x_expand: true, style: 'padding-left: 20px;' });
+                    const windowHbox = new St.BoxLayout({
+                        x_expand: true,
+                        style_class: 'window-item-container' // CSSクラス追加
+                    });
                     windowItem.add_child(windowHbox);
 
-                    windowHbox.add_child(new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER }));
+                    // ウィンドウタイトル
+                    const windowLabel = new St.Label({
+                        text: metaWindow.get_title() || '...',
+                        y_align: Clutter.ActorAlign.CENTER,
+                        style_class: 'window-item-title' // CSSクラス追加
+                    });
+                    windowHbox.add_child(windowLabel);
+
                     windowHbox.add_child(new St.Widget({ x_expand: true })); // スペーサー
 
-                    // 【変更点】閉じるボタンを追加
+                    // 閉じるボタン
                     const windowCloseButton = new St.Button({
                         style_class: 'window-close-button',
                         child: new St.Icon({ icon_name: 'window-close-symbolic' })
@@ -496,6 +528,7 @@ const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMen
             }
         }
 
+        // フォーカス復元処理
         if (lastFocusedId) {
             let itemToFocus = null;
             for (const newItem of this._windowsContainer) {
@@ -614,7 +647,7 @@ export default class AllWindowsExtension extends Extension {
         if (!app) {
             return false;
         }
-        
+
         const appInfo = app.get_app_info();
         // 【修正】appInfoがnullの場合を考慮するnullチェックを追加
         if (!appInfo) {
@@ -706,18 +739,27 @@ export default class AllWindowsExtension extends Extension {
         });
 
         return () => {
+
+            // 1. 最初にデータモデルを破棄し、外部イベントの監視を停止する
+            sessionResources.models.forEach(m => { try { m.destroy(); } catch (e) { /* ignore */ } });
+
+            // 2. 次に設定リスナーを切断する
             sessionResources.listeners.forEach(l => {
-                try { if (l.source && l.id) l.source.disconnect(l.id); } catch (e) { }
+                try { if (l.source && l.id) l.source.disconnect(l.id); } catch (e) { /* ignore */ }
             });
+
+            // 3. 最後にUI要素を安全に破棄する
+            this.appMenuButton?.destroy();
+            windowIconListWidget?.destroy();
+
+            // 4. Date Menu の位置を元に戻す
             try {
                 const dateMenu = Main.panel.statusArea.dateMenu;
                 if (dateMenu?.get_parent()) dateMenu.get_parent().remove_child(dateMenu);
                 Main.panel._centerBox.insert_child_at_index(dateMenu, 0);
-            } catch (e) { }
-            this.appMenuButton?.destroy();
-            windowIconListWidget?.destroy();
-            sessionResources.models.forEach(m => { try { m.destroy(); } catch (e) { } });
+            } catch (e) { /* ignore */ }
         };
+        // --- ▲▲▲ 修正箇所ここまで ▲▲▲ ---   };
     }
 
     _sortWindowGroups(windowGroups, favoriteAppIds) {

@@ -1,107 +1,297 @@
 /* ======================================================================
-// stylesheet.css (全体)
+// stylesheet.css - 洗練されたGnome Extension UI (サイズ調整とバグ修正版)
 // ====================================================================== */
 
-/* お気に入りバー */
+/* お気に入りバー - 適切なサイズに調整 */
 .favorites-bar-container {
     gap: 8px;
-    /* JSの .spacing = 8 の代替 */
 }
 
 .favorite-bar-app-icon {
     icon-size: 28px;
-    /* JSの icon_size: 28 の代替 */
 }
 
 .favorite-button {
-    padding: 4px;
-    border-radius: 6px;
-    transition: background-color 150ms ease-out;
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: all 150ms ease-out;
 }
 
 .favorite-button:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.12);
+    transform: translateY(-1px);
 }
 
 .favorite-button.selected {
-    background-color: rgba(255, 255, 255, 0.25);
+    background-color: rgba(74, 144, 226, 0.3);
+    border: 1px solid rgba(74, 144, 226, 0.5);
 }
 
-/* ポップアップメニューのウィンドウリスト */
-.window-list-header-icon {
-    margin-right: 8px;
+/* ポップアップメニュー全体 */
+.popup-menu-content {
+    padding: 8px 0;
+}
+
+/* ヘッダー項目 - フォントサイズとスペーシング改善 */
+.window-list-item .popup-menu-icon {
+    margin-right: 12px;
     icon-size: 20px;
-    /* JSの icon_size: 20 の代替 */
 }
 
-.window-list-header-title {
+/* ヘッダー項目のラベル（アプリ名） */
+.window-list-item St-Label {
     font-weight: bold;
+    font-size: 1.05em;
+    color: rgba(255, 255, 255, 0.95);
 }
 
-.window-list-item-hbox {
-    padding-left: 20px;
-    /* JSのインラインスタイルの代替 */
+/* より具体的なセレクタでヘッダー項目をターゲット */
+.window-list-item[data-type="group"] St-Label {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: rgba(255, 255, 255, 0.95);
 }
 
-/* 右端のアクションボタン(閉じる/お気に入り) */
+/* アプリヘッダー項目の専用スタイル */
+.app-header-item {
+    padding: 10px 14px;
+    margin: 3px 0 8px 0; /* 下のマージンを大きくしてセパレータ効果 */
+    border-radius: 6px;
+    transition: all 150ms ease-out;
+    /* より見やすいグループ区切りのセパレータ */
+    border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+    background-color: rgba(255, 255, 255, 0.02); /* 薄い背景でグループを強調 */
+}
+
+.app-header-container {
+    align-items: center;
+}
+
+.app-header-icon {
+    icon-size: 20px;
+    margin-right: 12px;
+}
+
+.app-header-title {
+    font-weight: bold;
+    font-size: 1.05em;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* ウィンドウ項目の専用スタイル */
+.window-item {
+    padding: 7px 14px;
+    margin: 2px 0;
+    border-radius: 5px;
+    transition: all 150ms ease-out;
+}
+
+.window-item-container {
+    padding-left: 32px; /* 20px + 12px */
+    align-items: center;
+}
+
+.window-item-title {
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+/* 共通のホバー・フォーカス効果 */
+.app-header-item:hover,
+.window-item:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-header-item:focus,
+.window-item:focus {
+    background-color: rgba(74, 144, 226, 0.15);
+    outline: 1px solid rgba(74, 144, 226, 0.3);
+}
+
 .item-actions-container {
-    gap: 4px;
-    /* ボタン間のスペースを一元管理 */
+    gap: 8px;
+    align-items: center;
 }
 
+/* お気に入り星ボタン */
 .favorite-star-button {
-    transition: color 150ms ease-out;
-    /* margin-left は .item-actions-container の gap で管理するため削除 */
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+    border-radius: 6px;
+    transition: all 150ms ease-out;
+    background-color: transparent;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .favorite-star-button:hover {
-    color: #E5A50A;
+    color: #F9C23C;
+    background-color: rgba(249, 194, 60, 0.15);
+    border-color: rgba(249, 194, 60, 0.3);
+    transform: scale(1.05);
 }
 
 .favorite-star-button .popup-menu-icon {
     icon-size: 16px;
 }
 
+/* 閉じるボタン - 基本スタイル */
 .window-close-button {
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
-    min-height: 22px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
     padding: 4px;
-    border-radius: 4px;
+    border-radius: 5px;
     color: transparent;
-    transition: opacity 200ms ease-out, visibility 200ms ease-out, color 200ms ease-out, background-color 150ms ease-out;
+    transition: all 200ms ease-out;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
     background-color: transparent;
-    border: none;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.window-list-item:hover .window-close-button,
-.window-list-item:focus .window-close-button {
+/* ヘッダー（グループ）の閉じるボタン - より目立つスタイル */
+.app-header-item .window-close-button {
+    background-color: rgba(255, 107, 107, 0.1);
+    border: 1px solid rgba(255, 107, 107, 0.2);
+    border-radius: 8px;
+}
+
+.app-header-item:hover .window-close-button,
+.app-header-item:focus .window-close-button {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    color: white;
+    color: #FF6B6B;
+    background-color: rgba(255, 107, 107, 0.2);
 }
 
-.window-list-item .window-close-button:hover {
-    color: #C01C28;
-    background-color: rgba(192, 28, 40, 0.2);
+.app-header-item .window-close-button:hover {
+    color: #FF4444;
+    background-color: rgba(255, 68, 68, 0.3);
+    transform: scale(1.1);
+    box-shadow: 0 2px 4px rgba(255, 107, 107, 0.3);
 }
 
-/* パネル上のアイコン */
+/* ウィンドウアイテムの閉じるボタン - よりシンプル */
+.window-item .window-close-button {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+
+.window-item:hover .window-close-button,
+.window-item:focus .window-close-button {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    color: rgba(255, 255, 255, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.window-item .window-close-button:hover {
+    color: #FF6B6B;
+    background-color: rgba(255, 107, 107, 0.15);
+    transform: scale(1.05);
+}
+
+/* パネル上のメインアイコン */
 .panel-main-icon {
-    icon-size: 16px;
-    /* 標準的なパネルアイコンサイズ */
+    icon-size: 18px;
+    margin: 0 5px;
 }
 
+/* パネル上のウィンドウアイコンリスト */
 .panel-window-icon {
     icon-size: 20px;
-    /* JSの icon_size: 20 の代替 */
 }
 
 .window-icon-list-container {
-    spacing: 2px;
+    spacing: 4px;
+    padding: 0 6px;
+}
+
+/* パネルボタンのスタイル改善 */
+.panel-button {
+    padding: 5px 7px;
+    border-radius: 6px;
+    transition: all 150ms ease-out;
+}
+
+.panel-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.panel-button:active {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* セパレーター */
+.popup-separator-menu-item {
+    margin: 6px 0;
+}
+
+/* メニュー項目の一般的なスタイル */
+.popup-menu-item {
+    padding: 7px 14px;
+    border-radius: 5px;
+    transition: all 150ms ease-out;
+}
+
+.popup-menu-item:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+/* フォーカス状態の改善 */
+.popup-menu-item:focus,
+.window-list-item:focus {
+    outline: 2px solid rgba(74, 144, 226, 0.4);
+    outline-offset: -1px;
+}
+
+/* アイコンの一般的なスタイル */
+.popup-menu-icon {
+    transition: all 150ms ease-out;
+}
+
+/* レスポンシブな調整 */
+@media (max-width: 1024px) {
+    .favorite-button {
+        padding: 5px 6px;
+    }
+
+    .window-list-item {
+        padding: 6px 10px;
+    }
+
+    .panel-main-icon {
+        icon-size: 16px;
+    }
+}
+
+/* グループ間の明確な区切り */
+.app-header-item:not(:first-child) {
+    margin-top: 12px; /* 前のグループとの間隔を明確に */
+    border-top: 1px solid rgba(255, 255, 255, 0.08); /* 上部にも境界線 */
+    padding-top: 12px; /* 上部のパディングを追加 */
+}
+
+/* 最初のヘッダー項目 */
+.app-header-item:first-child {
+    margin-top: 4px;
+}
+
+/* グループの最後のウィンドウアイテム後の間隔 */
+.window-item:last-of-type {
+    margin-bottom: 8px;
 }
