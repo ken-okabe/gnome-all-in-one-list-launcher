@@ -1,898 +1,692 @@
-import GLib from 'gi://GLib';
 import St from 'gi://St';
+import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
-import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib';
+import Gtk from 'gi://Gtk';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
 
-// --- Improved Custom Tooltip Class and Helper ---
-const Tooltip = GObject.registerClass(
-    class Tooltip extends St.Label {
-        _init() {
-            super._init({
-                style_class: 'tooltip',
-                style: `
-                    background-color: rgba(0, 0, 0, 0.8);
-                    color: white;
-                    padding: 6px 10px;
-                    border-radius: 5px;
-                    font-size: 14px;
-                    font-weight: 500;
-                    opacity: 0;
-                    pointer-events: none;
-                    z-index: 1000;
-                `,
-                visible: false
-            });
-            Main.uiGroup.add_child(this);
-            this._isDestroyed = false;
-            this._isVisible = false;
-        }
+import { Timeline, Now, combineLatestWith } from './timeline.js';
 
-        showTooltip(text, sourceActor) {
-            if (this._isDestroyed) return;
+// --- ▼▼▼ 修正されたカスタムメニュー項目クラス ▼▼▼ ---
 
-            this.set_text(text);
-            this.visible = true; // Make visible first to get correct dimensions
+const NonClosingPopupBaseMenuItem = GObject.registerClass({
+    Signals: {
+        'custom-activate': {}, // ウィンドウ/グループをアクティブにするためのシグナル
+        'custom-close': {},    // ウィンドウ/グループを閉じるためのシグナル
+    },
+}, class NonClosingPopupBaseMenuItem extends PopupMenu.PopupBaseMenuItem {
 
-            // Force a layout to get accurate dimensions
-            this.get_theme_node().get_content_box(this.get_allocation_box());
-
-            // Position tooltip near the source actor
-            const [stageX, stageY] = sourceActor.get_transformed_position();
-            const [actorWidth, actorHeight] = sourceActor.get_size();
-            const [tooltipWidth, tooltipHeight] = this.get_size();
-
-            // Check if the source actor is in the top panel
-            const isInTopPanel = this._isActorInTopPanel(sourceActor);
-
-            // Center horizontally above/below the source actor
-            const x = Math.max(0, Math.min(
-                stageX + actorWidth / 2 - tooltipWidth / 2,
-                global.stage.width - tooltipWidth
-            ));
-
-            let y;
-            if (isInTopPanel) {
-                // Position tooltip below the panel icon with some spacing
-                y = Math.min(
-                    stageY + actorHeight + 8,
-                    global.stage.height - tooltipHeight
-                );
-            } else {
-                // Position tooltip above the source actor (original behavior for popup menu items)
-                y = Math.max(0, stageY - tooltipHeight - 5);
-            }
-
-            this.set_position(x, y);
-            this._isVisible = true;
-
-            this.ease({
-                opacity: 255,
-                duration: 200,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-            });
-        }
-
-        _isActorInTopPanel(actor) {
-            // Check if the actor is a child of the top panel
-            let parent = actor.get_parent();
-            while (parent) {
-                if (parent === Main.panel) {
-                    return true;
-                }
-                // Also check if it's in any of the panel's boxes
-                if (parent === Main.panel._leftBox ||
-                    parent === Main.panel._centerBox ||
-                    parent === Main.panel._rightBox) {
-                    return true;
-                }
-                parent = parent.get_parent();
-            }
+    _init(params) {
+        super._init(params);
+        // メニューの自動クローズを無効にする
+        this.activate = (event) => {
+            // カスタムアクティベートシグナルを発火してから、メニューが閉じないようにする
+            this.emit('custom-activate');
+            // メニューが閉じるのを防ぐため、何も返さない（またはfalseを返す）
             return false;
+        };
+    }
+
+    // クリックイベント
+    vfunc_button_press_event(buttonEvent) {
+        if (buttonEvent.button === 1) { // 左クリック
+            // activateメソッドを呼び出すことで、通常のクリック処理を実行
+            this.activate(buttonEvent);
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    // クリック解放イベントも確実に止める
+    vfunc_button_release_event(buttonEvent) {
+        if (buttonEvent.button === 1) {
+            return Clutter.EVENT_STOP;
+        }
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    vfunc_key_press_event(keyEvent) {
+        const symbol = keyEvent.get_key_symbol();
+
+        // [+] Enterキーを明示的に捕捉する
+        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) {
+            // activateを発生させず、イベントをメニュー全体（AppMenuButton）に伝播させる
+            return Clutter.EVENT_PROPAGATE;
         }
 
-        hideTooltip() {
-            if (this._isDestroyed || !this._isVisible) return;
-
-            this._isVisible = false;
-            this.ease({
-                opacity: 0,
-                duration: 150,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                onComplete: () => {
-                    if (!this._isDestroyed && !this._isVisible) {
-                        this.visible = false;
-                    }
-                }
-            });
+        // Spaceキーはここで処理してイベントを停止する
+        if (symbol === Clutter.KEY_space) {
+            this.emit('custom-activate');
+            return Clutter.EVENT_STOP;
         }
 
-        destroy() {
-            if (this._isDestroyed) return;
-
-            this._isDestroyed = true;
-            this._isVisible = false;
-
-            // Stop any ongoing animations
-            this.remove_all_transitions();
-
-            // Hide immediately
-            this.visible = false;
-            this.opacity = 0;
-
-            // Remove from UI group
-            if (this.get_parent()) {
-                this.get_parent().remove_child(this);
-            }
-
-            super.destroy();
-        }
-    });
-
-function addTooltip(actor, text, delay = 500) {
-    let tooltip = null;
-    let showTimeout = null;
-    let hideTimeout = null;
-    let isHovering = false;
-
-    const enterHandler = actor.connect('enter-event', () => {
-        isHovering = true;
-
-        // Clear any existing hide timeout
-        if (hideTimeout) {
-            GLib.source_remove(hideTimeout);
-            hideTimeout = null;
+        // Backspaceキーもここで処理してイベントを停止する
+        else if (symbol === Clutter.KEY_BackSpace) {
+            this.emit('custom-close');
+            return Clutter.EVENT_STOP;
         }
 
-        // Clear any existing show timeout
-        if (showTimeout) {
-            GLib.source_remove(showTimeout);
-            showTimeout = null;
+        // 上下の矢印キーなど、上記以外のキーだけをデフォルト処理に任せる
+        return super.vfunc_key_press_event(keyEvent);
+    }
+    // タッチイベントも処理
+    vfunc_touch_event(touchEvent) {
+        if (touchEvent.type === Clutter.EventType.TOUCH_BEGIN) {
+            this.activate(touchEvent);
+            return Clutter.EVENT_STOP;
         }
+        return Clutter.EVENT_PROPAGATE;
+    }
+});
 
-        showTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
-            if (isHovering && !tooltip) {
-                tooltip = new Tooltip();
-            }
-            if (tooltip && !tooltip._isDestroyed && isHovering) {
-                tooltip.showTooltip(text, actor);
-            }
-            showTimeout = null;
-            return GLib.SOURCE_REMOVE;
-        });
-    });
-
-    const leaveHandler = actor.connect('leave-event', () => {
-        isHovering = false;
-
-        // Clear any pending show timeout
-        if (showTimeout) {
-            GLib.source_remove(showTimeout);
-            showTimeout = null;
-        }
-
-        if (tooltip && !tooltip._isDestroyed) {
-            // Hide immediately, no delay
-            tooltip.hideTooltip();
-
-            // Clean up tooltip after a short delay
-            hideTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
-                if (tooltip && !tooltip._isDestroyed) {
-                    tooltip.destroy();
-                    tooltip = null;
-                }
-                hideTimeout = null;
-                return GLib.SOURCE_REMOVE;
-            });
+const NonClosingPopupMenuItem = GObject.registerClass(
+    class NonClosingPopupMenuItem extends NonClosingPopupBaseMenuItem {
+        _init(text, params) {
+            super._init(params);
+            this.label = new St.Label({ text: text });
+            this.add_child(this.label);
         }
     });
 
-    // Enhanced cleanup function
-    actor._tooltipCleanup = () => {
-        isHovering = false;
+// --- ▲▲▲ 修正されたカスタムメニューアイテムクラス ▲▲▲ ---
 
-        // Disconnect signal handlers
-        if (enterHandler) {
-            try {
-                actor.disconnect(enterHandler);
-            } catch (e) {
-                // Actor might already be destroyed
-            }
-        }
-        if (leaveHandler) {
-            try {
-                actor.disconnect(leaveHandler);
-            } catch (e) {
-                // Actor might already be destroyed
-            }
-        }
 
-        // Clear timeouts
-        if (showTimeout) {
-            GLib.source_remove(showTimeout);
-            showTimeout = null;
-        }
-        if (hideTimeout) {
-            GLib.source_remove(hideTimeout);
-            hideTimeout = null;
-        }
-
-        // Destroy tooltip immediately
-        if (tooltip) {
-            tooltip.destroy();
-            tooltip = null;
-        }
-
-        // Remove cleanup function reference
-        delete actor._tooltipCleanup;
-    };
-}
-
-// --- Model ---
 const WindowModel = GObject.registerClass({
     Signals: { 'updated': {} },
 }, class WindowModel extends GObject.Object {
     _init() {
         super._init();
+        this.windowsTimeline = Timeline([]);
         this._windowTracker = Shell.WindowTracker.get_default();
-        this._data = [];
-        this._windowSignalIds = new Map();
-        this._restackedId = global.display.connect('restacked', () => this.update());
-
-        // Load favorite settings and monitor changes
-        this._favoritesSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
-        this._favoritesChangedId = this._favoritesSettings.connect('changed::favorite-apps', () => this.update());
-
+        this._signalIds = new Map();
+        this._trackerChangedId = this._windowTracker.connect('tracked-windows-changed', () => this.update());
         this.update();
     }
-    getData() { return this._data; }
     update() {
-        for (const [win, signalId] of this._windowSignalIds) {
-            if (win && signalId > 0 && win.get_compositor_private()) {
-                win.disconnect(signalId);
-            }
-        }
-        this._windowSignalIds.clear();
+        this._disconnectWindowSignals();
         const groupedByApp = new Map();
-        const windows = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null);
-        for (const metaWindow of windows) {
+        for (const metaWindow of global.display.get_tab_list(Meta.TabList.NORMAL_ALL, null)) {
             if (metaWindow.is_skip_taskbar()) continue;
             const app = this._windowTracker.get_window_app(metaWindow);
             if (!app) continue;
-            const signalId = metaWindow.connect('notify::title', () => this.update());
-            this._windowSignalIds.set(metaWindow, signalId);
+            const titleId = metaWindow.connect('notify::title', () => this.update());
+            const posId = metaWindow.connect('position-changed', () => this.update());
+            this._signalIds.set(metaWindow, [titleId, posId]);
             const appId = app.get_id();
-            if (!groupedByApp.has(appId)) groupedByApp.set(appId, { app: app, windows: [] });
+            if (!groupedByApp.has(appId)) {
+                groupedByApp.set(appId, { app, windows: [] });
+            }
             groupedByApp.get(appId).windows.push(metaWindow);
         }
-
-        const favorites = this._favoritesSettings.get_strv('favorite-apps');
-
-        this._data = Array.from(groupedByApp.values()).sort((a, b) => {
-            const appIdA = a.app.get_id();
-            const appIdB = b.app.get_id();
-
-            const isFavoriteA = favorites.includes(appIdA);
-            const isFavoriteB = favorites.includes(appIdB);
-
-            // 1. If both are favorites, prioritize the order in the favorites list
-            if (isFavoriteA && isFavoriteB) {
-                const indexA = favorites.indexOf(appIdA);
-                const indexB = favorites.indexOf(appIdB);
-                return indexA - indexB;
-            }
-
-            // 2. If only one is a favorite, prioritize the favorite
-            if (isFavoriteA) return -1; // a is favorite, so a comes first
-            if (isFavoriteB) return 1;  // b is favorite, so b comes first
-
-            // 3. If neither is a favorite, sort alphabetically
-            return a.app.get_name().localeCompare(b.app.get_name());
-        });
+        this.windowsTimeline.define(Now, Array.from(groupedByApp.values()));
         this.emit('updated');
     }
+    _disconnectWindowSignals() {
+        for (const [win, ids] of this._signalIds) {
+            for (const id of ids) {
+                try { if (win && !win.is_destroyed) win.disconnect(id); } catch (e) { /* ignore */ }
+            }
+        }
+        this._signalIds.clear();
+    }
     destroy() {
-        if (this._restackedId) global.display.disconnect(this._restackedId);
-        for (const [win, signalId] of this._windowSignalIds) {
-            if (win && signalId > 0 && win.get_compositor_private()) win.disconnect(signalId);
-        }
-        this._windowSignalIds.clear();
-
-        // Disconnect favorite settings
-        if (this._favoritesSettings && this._favoritesChangedId) {
-            this._favoritesSettings.disconnect(this._favoritesChangedId);
-            this._favoritesSettings = null;
-        }
+        if (this._trackerChangedId) this._windowTracker.disconnect(this._trackerChangedId);
+        this._disconnectWindowSignals();
     }
 });
 
-// --- View 2 (WindowIconList) - Fixed Version ---
 const WindowIconList = GObject.registerClass(
-    class WindowIconList extends GObject.Object {
-        _init(params) {
-            super._init();
-            this._model = params.model;
-            this._iconSize = params.iconSize || 24;
-            this.wrapperButton = new PanelMenu.Button(0.0, 'Window-Icon-List-Wrapper');
-            this.wrapperButton.remove_style_class_name('panel-button');
-            this.container = new St.BoxLayout({ name: 'WindowIconListContainer' });
-            this.wrapperButton.add_child(this.container);
-            this._updatedConnection = this._model.connect('updated', () => this._redraw());
-            this._iconButtons = []; // Track all icon buttons for cleanup
-            this._redraw();
+    class WindowIconList extends St.BoxLayout {
+        _init() {
+            super._init({ style_class: 'panel-buttons' });
         }
-
-        _redraw() {
-            // Clean up existing tooltips before destroying children
-            this._cleanupTooltips();
-            this.container.destroy_all_children();
-            this._iconButtons = []; // Reset the tracking array
-
-            const sortedApps = this._model.getData();
-            for (const group of sortedApps) {
-                for (const win of group.windows) {
-                    const button = this._createIconButton(group.app, win);
-                    this.container.add_child(button);
-                    this._iconButtons.push(button); // Track this button
-                }
-            }
-        }
-
-        _createIconButton(app, metaWindow) {
-            const icon = new St.Icon({ gicon: app.get_icon(), icon_size: this._iconSize });
-            const button = new St.Button({
-                child: icon,
-                style_class: 'panel-button',
-                track_hover: true,
-                reactive: true
-            });
-
-            // Add custom tooltip with app name - 迅速に表示（遅延なし）
-            addTooltip(button, app.get_name(), 0);
-
-            button.connect('clicked', () => { metaWindow.activate(global.get_current_time()); });
-            return button;
-        }
-
-        _cleanupTooltips() {
-            // Clean up tooltips from all tracked buttons
-            this._iconButtons.forEach(button => {
-                if (button && button._tooltipCleanup) {
-                    button._tooltipCleanup();
-                }
+        update(windowGroups) {
+            if (!this || this.is_destroyed) return;
+            this.destroy_all_children();
+            if (!windowGroups) return;
+            // ★ グループ内ウィンドウをX座標順でソート
+            windowGroups.forEach(group => {
+                const sortedWindows = group.windows.slice().sort((winA, winB) => {
+                    return winA.get_frame_rect().x - winB.get_frame_rect().x;
+                });
+                sortedWindows.forEach(win => {
+                    const icon = new St.Icon({
+                        gicon: group.app.get_icon(),
+                        style_class: 'system-status-icon',
+                        icon_size: 20
+                    });
+                    const button = new St.Button({ child: icon });
+                    button.connect('clicked', () => Main.activateWindow(win));
+                    this.add_child(button);
+                });
             });
         }
-
-        destroy() {
-            // Clean up tooltips before destroying
-            this._cleanupTooltips();
-
-            if (this._updatedConnection) {
-                this._model.disconnect(this._updatedConnection);
-                this._updatedConnection = null;
-            }
-
-            // Clear the tracking array
-            this._iconButtons = [];
-
-            if (this.wrapperButton) {
-                this.wrapperButton.destroy();
-                this.wrapperButton = null;
-            }
-        }
+        destroy() { super.destroy(); }
     });
 
-// --- View 1 (AppMenuButton) ---
-const AppMenuButton = GObject.registerClass(
-    class AppMenuButton extends PanelMenu.Button {
-        _init(params) {
-            super._init(0.0, 'All Windows Menu');
-            this._model = params.model;
-            this._extension = params.extension;
-            this._tooltipActors = []; // ツールチップを持つアクターを追跡
-
-            this._settings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
-            this._settingsChangedId = this._settings.connect('changed::favorite-apps', () => this._redraw());
-
-            this.add_child(new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' }));
-            this.menu.actor.add_style_class_name('compact-window-list');
-
-            // メニューが閉じられた時のクリーンアップ
-            this._menuClosedId = this.menu.connect('menu-closed', () => {
-                this._cleanupAllTooltips();
-            });
-
-            this._updatedConnection = this._model.connect('updated', () => this._redraw());
-            this._redraw();
+const WindowIconListIndicator = GObject.registerClass(
+    class WindowIconListIndicator extends PanelMenu.Button {
+        _init() {
+            super._init(0.0, null, false);
+            this.reactive = false;
+            this._iconList = new WindowIconList();
+            this.add_child(this._iconList);
         }
-
-        _cleanupAllTooltips() {
-            // 全てのツールチップアクターをクリーンアップ
-            this._tooltipActors.forEach(actor => {
-                if (actor && actor._tooltipCleanup) {
-                    actor._tooltipCleanup();
-                }
-            });
-            this._tooltipActors = [];
+        update(windowGroups) {
+            if (!this._iconList) return;
+            this._iconList.update(windowGroups);
         }
-
-        _addTooltipActor(actor) {
-            // ツールチップを持つアクターを追跡リストに追加
-            this._tooltipActors.push(actor);
-        }
-
-        _redraw() {
-            // 既存のツールチップをクリーンアップ
-            this._cleanupAllTooltips();
-
-            this.menu.removeAll();
-            const favorites = this._settings.get_strv('favorite-apps');
-            const sortedApps = this._model.getData();
-
-            const listItemStyle = 'min-height: 36px; padding: 0 8px;';
-            const separatorStyle = 'padding: 0; margin: 0; height: 1px; background-color: rgba(192, 192, 192, 0.2);';
-
-            if (favorites.length > 0) {
-                const favoritesItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, style_class: 'popup-menu-item' });
-                favoritesItem.actor.set_style(listItemStyle);
-
-                const mainBox = new St.BoxLayout({ x_expand: true, style: 'spacing: 6px;', y_align: Clutter.ActorAlign.CENTER });
-                const favoritesBox = new St.BoxLayout({ x_expand: true, style: 'spacing: 6px;' });
-
-                for (const appId of favorites) {
-                    const app = Shell.AppSystem.get_default().lookup_app(appId);
-                    if (!app) continue;
-
-                    const icon = new St.Icon({ gicon: app.get_icon(), icon_size: 28 });
-                    const button = new St.Button({
-                        child: icon,
-                        style_class: 'popup-menu-item',
-                        track_hover: true,
-                        can_focus: true,
-                        accessible_name: app.get_name()
-                    });
-
-                    const normalStyle = 'background-color: transparent; padding: 4px; border-radius: 4px;';
-                    const hoverStyle = 'background-color: rgba(255, 255, 255, 0.1); padding: 4px; border-radius: 4px;';
-                    button.set_style(normalStyle);
-
-                    // ツールチップを追加し、追跡リストに登録
-                    addTooltip(button, app.get_name(), 0);
-                    this._addTooltipActor(button);
-
-                    button.connect('enter-event', () => button.set_style(hoverStyle));
-                    button.connect('leave-event', () => button.set_style(normalStyle));
-
-                    button.connect('clicked', () => {
-                        this._cleanupAllTooltips(); // クリック時にツールチップをクリーンアップ
-                        try {
-                            app.launch(0, [], null);
-                            this.menu.close();
-                        } catch (error) {
-                            try {
-                                const context = global.create_app_launch_context(
-                                    global.get_current_time(),
-                                    global.workspace_manager.get_active_workspace().index
-                                );
-                                app.launch(0, [], context);
-                                this.menu.close();
-                            } catch (contextError) {
-                                console.error(`[AllWindows] Fallback to activate()`);
-                                app.activate();
-                                this.menu.close();
-                            }
-                        }
-                    });
-
-                    favoritesBox.add_child(button);
-                }
-
-                const settingsIcon = new St.Icon({ icon_name: 'preferences-system-symbolic', icon_size: 16, style_class: 'popup-menu-icon' });
-                const settingsButton = new St.Button({ child: settingsIcon, style_class: 'popup-menu-item', accessible_name: _("Settings"), style: 'padding: 4px; border-radius: 4px;' });
-                settingsButton.connect('clicked', () => {
-                    this._cleanupAllTooltips();
-                    this._extension.openPreferences();
-                    this.menu.close();
-                });
-
-                mainBox.add_child(favoritesBox);
-                mainBox.add_child(settingsButton);
-
-                favoritesItem.add_child(mainBox);
-                this.menu.addMenuItem(favoritesItem);
-            }
-
-            if (sortedApps.length > 0) {
-                if (favorites.length > 0) {
-                    const separator = new PopupMenu.PopupSeparatorMenuItem();
-                    separator.actor.set_style(separatorStyle);
-                    this.menu.addMenuItem(separator);
-                }
-
-                for (const group of sortedApps) {
-                    if (group.windows.length === 0) continue;
-
-                    const appId = group.app.get_id();
-                    const isFavorite = favorites.includes(appId);
-
-                    const appHeader = new PopupMenu.PopupBaseMenuItem({ reactive: false, style_class: 'popup-menu-item' });
-                    appHeader.actor.set_style(listItemStyle);
-
-                    const mainBox = new St.BoxLayout({ x_expand: true, style: 'spacing: 8px;', y_align: Clutter.ActorAlign.CENTER });
-                    const appInfoBox = new St.BoxLayout({ x_expand: true, style: 'spacing: 8px;' });
-                    appInfoBox.add_child(group.app.create_icon_texture(24));
-                    appInfoBox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER }));
-
-                    const appInfoButton = new St.Button({ child: appInfoBox, x_expand: true, style_class: 'popup-menu-item' });
-
-                    appInfoButton.connect('clicked', () => {
-                        this._cleanupAllTooltips();
-                        group.windows.forEach(metaWindow => metaWindow.activate(global.get_current_time()));
-                        this.menu.close();
-                    });
-
-                    const rightButtonBox = new St.BoxLayout({ style: 'spacing: 4px;' });
-
-                    if (isAppLaunchable(group.app)) {
-                        const favoriteIconName = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
-                        const favoriteTooltip = isFavorite ? _("Remove from favorites") : _("Add to favorites");
-                        const favoriteIcon = new St.Icon({ icon_name: favoriteIconName, icon_size: 16, style_class: 'popup-menu-icon' });
-                        const favoriteButton = new St.Button({ child: favoriteIcon, style_class: 'popup-menu-item', accessible_name: favoriteTooltip, style: 'padding: 4px; border-radius: 4px;' });
-
-                        // お気に入りボタンにもツールチップを追加し、追跡
-                        addTooltip(favoriteButton, favoriteTooltip, 0);
-                        this._addTooltipActor(favoriteButton);
-
-                        favoriteButton.connect('clicked', () => {
-                            this._cleanupAllTooltips();
-                            this._toggleFavorite(appId);
-                        });
-                        rightButtonBox.add_child(favoriteButton);
-                    }
-
-                    mainBox.add_child(appInfoButton);
-                    mainBox.add_child(rightButtonBox);
-
-                    appHeader.add_child(mainBox);
-                    this.menu.addMenuItem(appHeader);
-
-                    for (const metaWindow of group.windows) {
-                        const item = new PopupMenu.PopupBaseMenuItem({
-                            reactive: true,
-                            style_class: 'popup-menu-item'
-                        });
-                        item.actor.style = 'padding-left: 38px;';
-
-                        const contentBox = new St.BoxLayout({
-                            x_expand: true,
-                            y_align: Clutter.ActorAlign.CENTER
-                        });
-                        item.add_child(contentBox);
-
-                        // Main clickable area (title)
-                        const titleBox = new St.BoxLayout({
-                            x_expand: true,
-                            y_align: Clutter.ActorAlign.CENTER,
-                            reactive: true,
-                            track_hover: true,
-                            style_class: 'window-title-area'
-                        });
-
-                        const titleLabel = new St.Label({
-                            text: ellipsizedWindowTitle(metaWindow),
-                            y_align: Clutter.ActorAlign.CENTER,
-                            x_expand: true
-                        });
-                        titleBox.add_child(titleLabel);
-
-                        // Close button (initially hidden)
-                        const closeIcon = new St.Icon({
-                            icon_name: 'window-close-symbolic',
-                            icon_size: 14,
-                            style_class: 'popup-menu-icon',
-                            opacity: 0
-                        });
-
-                        const closeButton = new St.Button({
-                            child: closeIcon,
-                            style_class: 'window-close-button',
-                            accessible_name: _("Close Window"),
-                            style: `
-                        padding: 3px 5px; 
-                        border-radius: 3px; 
-                        margin-left: 4px;
-                        min-width: 18px;
-                        transition-duration: 150ms;
-                        background-color: transparent;
-                    `,
-                            opacity: 0,
-                            reactive: true,
-                            track_hover: true
-                        });
-
-                        // Add hover effects for smooth appearance
-                        const showCloseButton = () => {
-                            closeButton.ease({
-                                opacity: 255,
-                                duration: 150,
-                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                            });
-                            closeIcon.ease({
-                                opacity: 255,
-                                duration: 150,
-                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                            });
-                        };
-
-                        const hideCloseButton = () => {
-                            closeButton.ease({
-                                opacity: 0,
-                                duration: 150,
-                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                            });
-                            closeIcon.ease({
-                                opacity: 0,
-                                duration: 150,
-                                mode: Clutter.AnimationMode.EASE_OUT_QUAD
-                            });
-                        };
-
-                        // Close button hover effects (red tint)
-                        closeButton.connect('enter-event', () => {
-                            showCloseButton();
-                            closeButton.set_style(`
-                        padding: 3px 5px; 
-                        border-radius: 3px; 
-                        margin-left: 4px;
-                        min-width: 18px;
-                        transition-duration: 150ms;
-                        background-color: rgba(255, 100, 100, 0.2);
-                    `);
-                            closeIcon.set_style('color: #ff6666;');
-                            return Clutter.EVENT_STOP;
-                        });
-
-                        closeButton.connect('leave-event', () => {
-                            closeButton.set_style(`
-                        padding: 3px 5px; 
-                        border-radius: 3px; 
-                        margin-left: 4px;
-                        min-width: 18px;
-                        transition-duration: 150ms;
-                        background-color: transparent;
-                    `);
-                            closeIcon.set_style('color: inherit;');
-                            return Clutter.EVENT_PROPAGATE;
-                        });
-
-                        // Hover events for the entire item
-                        item.connect('enter-event', showCloseButton);
-                        item.connect('leave-event', hideCloseButton);
-
-                        // Title click activation
-                        titleBox.connect('button-press-event', (actor, event) => {
-                            if (event.get_button() === 1) {
-                                this._cleanupAllTooltips();
-                                metaWindow.activate(global.get_current_time());
-                                this.menu.close();
-                                return Clutter.EVENT_STOP;
-                            }
-                            return Clutter.EVENT_PROPAGATE;
-                        });
-
-                        // Close button functionality
-                        closeButton.connect('clicked', (actor, event) => {
-                            this._cleanupAllTooltips();
-                            metaWindow.delete(global.get_current_time());
-                            this.menu.close();
-                            return Clutter.EVENT_STOP;
-                        });
-
-                        closeButton.connect('enter-event', () => {
-                            showCloseButton();
-                            closeButton.set_style(`
-                        padding: 3px 5px; 
-                        border-radius: 3px; 
-                        margin-left: 4px;
-                        min-width: 18px;
-                        transition-duration: 150ms;
-                        background-color: rgba(255, 100, 100, 0.2);
-                    `);
-                            closeIcon.set_style('color: #ff6666;');
-                            return Clutter.EVENT_STOP;
-                        });
-
-                        contentBox.add_child(titleBox);
-                        contentBox.add_child(closeButton);
-                        this.menu.addMenuItem(item);
-                    }
-
-                    // Add separator line after each group
-                    const separator = new PopupMenu.PopupSeparatorMenuItem();
-                    separator.actor.set_style(separatorStyle);
-                    this.menu.addMenuItem(separator);
-                }
-            }
-
-            if (this.menu.isEmpty()) {
-                this.menu.addMenuItem(new PopupMenu.PopupMenuItem(_("No open windows or favorites"), { reactive: false }));
-            }
-        }
-
-        _toggleFavorite(appId) {
-            let favorites = this._settings.get_strv('favorite-apps');
-            if (favorites.includes(appId)) {
-                favorites.splice(favorites.indexOf(appId), 1);
-            } else {
-                favorites.push(appId);
-            }
-            this._settings.set_strv('favorite-apps', favorites);
-        }
-
         destroy() {
-            // すべてのツールチップをクリーンアップ
-            this._cleanupAllTooltips();
-
-            if (this._menuClosedId) {
-                this.menu.disconnect(this._menuClosedId);
-                this._menuClosedId = null;
-            }
-
-            if (this._settings && this._settingsChangedId) {
-                this._settings.disconnect(this._settingsChangedId);
-                this._settings = null;
-            }
-            if (this._updatedConnection) {
-                this._model.disconnect(this._updatedConnection);
-                this._updatedConnection = null;
+            if (this._iconList) {
+                this._iconList.destroy();
+                this._iconList = null;
             }
             super.destroy();
         }
     });
-// --- Helper functions ---
-function ellipsizeString(s, l) { if (s.length > l) return s.substring(0, l) + '...'; return s; }
-function ellipsizedWindowTitle(metaWindow) { return ellipsizeString(metaWindow.get_title() || "-", 100); }
-function isAppLaunchable(app) {
-    if (!app) return false;
-    const appId = app.get_id();
-    if (!appId) return false;
-    try {
-        const systemApp = Shell.AppSystem.get_default().lookup_app(appId);
-        if (!systemApp) return false;
-        const appInfo = systemApp.get_app_info();
-        if (!appInfo) return false;
-        return appInfo.should_show();
-    } catch (e) {
-        console.error(`[AllWindows] Error checking if app is launchable: ${e}`);
+
+
+const AppMenuButton = GObject.registerClass(class AppMenuButton extends PanelMenu.Button {
+    _init(params) {
+        super._init(0.0, 'Timeline Event Network');
+        this._isDestroyed = false;
+
+        this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
+        this.add_child(this._panelIcon);
+
+        this._extension = params.extension;
+        this._settings = params.settings;
+
+        this._favoritesContainer = null;
+        this._separatorItem = null;
+        this._windowsContainer = [];
+
+        this._lastFocusedItem = null;
+        this._resetting = false;
+
+        const favoritesTimeline = params.favoritesTimeline;
+        const windowsTimeline = params.windowsTimeline;
+        const initialFavorites = favoritesTimeline.at(Now);
+
+        this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
+
+        // --- ▼▼▼ 修正箇所 ▼▼▼ ---
+
+        // 1. お気に入りバー（上段）の状態管理 (この部分は変更なし)
+        const favoritesStateTimeline = combineLatestWith(
+            (favs, selectedIndex) => ({ favs, selectedIndex })
+        )(favoritesTimeline)(this._selectedFavoriteIndexTimeline);
+
+        // 2. ウィンドウリスト（下段）の状態管理
+        //    windowsTimeline と favoritesTimeline の両方の変更を購読する必要があるため、ここで結合します。
+        const windowSectionDataTimeline = combineLatestWith(
+            (windows, favs) => ({ windows, favs })
+        )(windowsTimeline)(favoritesTimeline);
+
+        // メニュー構造の初期化と初回描画
+        this._initializeMenuStructure();
+        this._performInitialDisplay(initialFavorites, this._selectedFavoriteIndexTimeline.at(Now), windowsTimeline.at(Now));
+
+        // 3. UIの更新ロジックを、それぞれの状態Timelineに接続
+
+        // お気に入りバーは favoritesStateTimeline の変更を購読
+        favoritesStateTimeline.map(state => {
+            if (this._isDestroyed) return;
+            this._updateFavoritesSection(state.favs, state.selectedIndex);
+        });
+
+        // ウィンドウリストは、新しく作成した windowSectionDataTimeline の変更を購読
+        windowSectionDataTimeline.map(({ windows, favs }) => {
+            if (this._isDestroyed) return;
+            // これで、お気に入りが変更された時も _updateWindowsSection が呼ばれるようになります。
+            this._updateWindowsSection(windows, favs);
+        });
+
+        // --- ▲▲▲ 修正完了 ▲▲▲ ---
+    }
+
+    _flashIcon(color) {
+        const originalStyle = this._panelIcon.get_style();
+        this._panelIcon.set_style(`background-color: ${color};`);
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            if (this._panelIcon && !this._panelIcon.is_destroyed) {
+                this._panelIcon.set_style(originalStyle);
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _initializeMenuStructure() {
+        if (this._isDestroyed) return;
+        this.menu.removeAll();
+        this.menu.actor.connect('key-press-event', this._onMenuKeyPress.bind(this));
+
+        this.menu.connect('active-item-changed', (menu, item) => {
+            this._lastFocusedItem = item;
+        });
+
+        this._favoritesContainer = null;
+        this._separatorItem = null;
+        this._windowsContainer = [];
+    }
+
+    _handleFavLaunch() {
+        this._flashIcon('blue');
+
+        const selectedIndex = this._selectedFavoriteIndexTimeline.at(Now);
+        if (selectedIndex !== null) {
+            const favs = this._extension.favsSettings.get_strv('favorite-apps');
+            const appId = favs[selectedIndex];
+            if (appId) {
+                const app = Shell.AppSystem.get_default().lookup_app(appId);
+                if (app) {
+                    this._launchNewInstance(app);
+                    this._resetMenuState();
+                }
+            }
+        }
+    }
+
+    _handleWindowActivate(actor, item, itemType) {
+        this._flashIcon('green');
+        this._activateSelection(actor, item, itemType);
+        // メニューを閉じないようにする
+        // this._resetMenuState(); をコメントアウト
+    }
+
+    _handleWindowClose(actor, item, itemType) {
+        this._flashIcon('red');
+        this._closeSelection(actor, item, itemType);
+        this._resetMenuState();
+    }
+
+    _resetMenuState() {
+        if (this._resetting) return;
+        this._resetting = true;
+
+        let handlerId = 0;
+
+        handlerId = this.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (!isOpen) {
+                this.menu.open();
+
+                if (this.menu.first_item) {
+                    this.menu.set_active_item(this.menu.first_item);
+                }
+                this.menu.actor.grab_key_focus();
+
+                if (handlerId > 0) {
+                    this.menu.disconnect(handlerId);
+                }
+
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+                    this._resetting = false;
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
+        });
+
+        this.menu.close();
+    }
+
+    _onMenuKeyPress(actor, event) {
+        const symbol = event.get_key_symbol();
+
+        if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
+            this._flashIcon('orange');
+            const favs = this._extension.favsSettings.get_strv('favorite-apps');
+            if (favs.length > 0) {
+                const direction = (symbol === Clutter.KEY_Left) ? -1 : 1;
+                const currentIndex = this._selectedFavoriteIndexTimeline.at(Now) ?? favs.length;
+                const newIndex = (currentIndex + direction + favs.length) % favs.length;
+                this._selectedFavoriteIndexTimeline.define(Now, newIndex);
+            }
+            return Clutter.EVENT_STOP;
+        }
+
+        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) {
+            this._handleFavLaunch();
+            return Clutter.EVENT_STOP;
+        }
+
+        return Clutter.EVENT_PROPAGATE;
+    }
+
+    _performInitialDisplay(initialFavorites, initialSelectedIndex, initialWindows) {
+        if (this._isDestroyed) return;
+        this._updateFavoritesSection(initialFavorites, initialSelectedIndex);
+        this._updateWindowsSection(initialWindows, initialFavorites);
+    }
+
+    _updateFavoritesSection(favoriteAppIds, selectedIndex) {
+        if (this._isDestroyed) return;
+        this._favoritesContainer?.destroy();
+        this._favoritesContainer = null;
+        this._separatorItem?.destroy();
+        this._separatorItem = null;
+        if (favoriteAppIds && favoriteAppIds.length > 0) {
+            const appSystem = Shell.AppSystem.get_default();
+            this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
+            const favoritesBox = new St.BoxLayout({ x_expand: true });
+            favoritesBox.spacing = 8;
+            this._favoritesContainer.add_child(favoritesBox);
+            favoriteAppIds.forEach((appId, index) => {
+                const app = appSystem.lookup_app(appId);
+                if (!app) return;
+                const button = new St.Button({
+                    child: new St.Icon({ gicon: app.get_icon(), icon_size: 28 }),
+                    can_focus: false, track_hover: true, style_class: 'favorite-button'
+                });
+                if (index === selectedIndex) button.add_style_class_name('selected');
+                button.connect('clicked', () => this._launchNewInstance(app));
+                favoritesBox.add_child(button);
+            });
+            this.menu.box.insert_child_at_index(this._favoritesContainer.actor, 0);
+            this._separatorItem = new PopupMenu.PopupSeparatorMenuItem();
+            this.menu.box.insert_child_at_index(this._separatorItem.actor, 1);
+        }
+    }
+
+    _updateWindowsSection(windowGroups, favoriteAppIds) {
+        if (this._isDestroyed) return;
+        let lastFocusedId = null;
+        if (this._lastFocusedItem && !this._lastFocusedItem.is_destroyed) {
+            const itemData = this._lastFocusedItem._itemData;
+            const itemType = this._lastFocusedItem._itemType;
+            if (itemType === 'group') {
+                lastFocusedId = `app:${itemData.app.get_id()}`;
+            } else if (itemType === 'window') {
+                lastFocusedId = `win:${itemData.get_id()}`;
+            }
+        }
+        this._windowsContainer.forEach(child => child.destroy());
+        this._windowsContainer = [];
+        if (!windowGroups || windowGroups.length === 0) {
+            const noWindowsItem = new PopupMenu.PopupMenuItem(_("No open windows"), { reactive: false });
+            this.menu.addMenuItem(noWindowsItem);
+            this._windowsContainer.push(noWindowsItem);
+        } else {
+            // ★ 一次ソート: お気に入り優先→起動順
+            const sortedGroups = this._extension._sortWindowGroups([...windowGroups], favoriteAppIds);
+            for (const group of sortedGroups) {
+                const headerItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true });
+                headerItem._itemData = group;
+                headerItem._itemType = 'group';
+                const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER });
+                headerItem.add_child(hbox);
+                hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20 }));
+                hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER }));
+                hbox.add_child(new St.Widget({ x_expand: true }));
+                const isFavorite = favoriteAppIds.includes(group.app.get_id());
+                const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
+                const starButton = new St.Button({ child: new St.Icon({ icon_name: starIcon, style_class: 'popup-menu-icon' }) });
+                starButton.connect('clicked', (button, event) => {
+                    this._extension._toggleFavorite(group.app.get_id());
+                    if (event) {
+                        event.stop_propagation();
+                    }
+                    return Clutter.EVENT_STOP;
+                });
+                hbox.add_child(starButton);
+                headerItem.connect('custom-activate', () => this._handleWindowActivate(headerItem, group, 'group'));
+                headerItem.connect('custom-close', () => this._handleWindowClose(headerItem, group, 'group'));
+                this.menu.addMenuItem(headerItem);
+                this._windowsContainer.push(headerItem);
+                // ★ グループ内ウィンドウをY座標順でソート
+                const sortedWindows = group.windows.slice().sort((winA, winB) => {
+                    return winA.get_frame_rect().y - winB.get_frame_rect().y;
+                });
+                for (const metaWindow of sortedWindows) {
+                    const windowItem = new NonClosingPopupMenuItem('    ' + (metaWindow.get_title() || '...'), { reactive: true, can_focus: true });
+                    windowItem._itemData = metaWindow;
+                    windowItem._itemType = 'window';
+                    windowItem.connect('custom-activate', () => this._handleWindowActivate(windowItem, metaWindow, 'window'));
+                    windowItem.connect('custom-close', () => this._handleWindowClose(windowItem, metaWindow, 'window'));
+                    this.menu.addMenuItem(windowItem);
+                    this._windowsContainer.push(windowItem);
+                }
+            }
+        }
+        if (lastFocusedId) {
+            let itemToFocus = null;
+            for (const newItem of this._windowsContainer) {
+                if (!newItem._itemData) continue;
+                const itemData = newItem._itemData;
+                const itemType = newItem._itemType;
+                let currentId = null;
+                if (itemType === 'group') {
+                    currentId = `app:${itemData.app.get_id()}`;
+                } else if (itemType === 'window') {
+                    currentId = `win:${itemData.get_id()}`;
+                }
+                if (currentId === lastFocusedId) {
+                    itemToFocus = newItem;
+                    break;
+                }
+            }
+            if (itemToFocus) {
+                this.menu.set_active_item(itemToFocus);
+            } else {
+                this._lastFocusedItem = null;
+            }
+        }
+    }
+
+    _isStarButtonClick(source, starButton) {
+        let current = source;
+        while (current) {
+            if (current === starButton) {
+                return true;
+            }
+            current = current.get_parent();
+        }
         return false;
     }
-}
 
+    _closeSelection(actor, item, itemType) {
+        if (this._isDestroyed) return;
+        if (itemType === 'group') item.windows.forEach(win => win.delete(global.get_current_time()));
+        else item.delete(global.get_current_time());
+    }
 
-// --- Main extension ---
+    _activateSelection(actor, item, itemType) {
+        if (this._isDestroyed) return;
+        const windowToActivate = (itemType === 'group') ? item.windows[0] : item;
+        if (windowToActivate) Main.activateWindow(windowToActivate);
+    }
+
+    _launchNewInstance(app) {
+        if (this._isDestroyed) return;
+        app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
+    }
+
+    destroy() {
+        if (this._isDestroyed) return;
+        this._isDestroyed = true;
+        super.destroy();
+    }
+});
+
 export default class AllWindowsExtension extends Extension {
-    _settings;
-    _model;
-    _appMenuButton;
-    _windowIconList;
-    _settingsChangedId;
-    _startupCompleteId;
-
     enable() {
-        this._initMembers();
-
-        this._settings = this.getSettings();
-        const indicatorPos = this._settings.get_string('indicator-position');
-        const dateMenuPos = this._settings.get_string('date-menu-position');
-
-        this._initUI();
-        this._addIndicatorsToPanel(indicatorPos);
-        this._moveDateMenu(dateMenuPos);
-        this._applyOverviewSetting();
-        this._connectSettingsChanges();
-    }
-
-    disable() {
-        this._moveDateMenu('center');
-        this._destroyUI();
-        this._disconnectSettingsChanges();
-        this._initMembers();
-    }
-
-    _initMembers() {
-        this._settings = null;
-        this._model = null;
-        this._appMenuButton = null;
-        this._windowIconList = null;
-        this._settingsChangedId = null;
+        this.settings = this.getSettings();
+        this.favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
+        this.appMenuButton = null;
+        this.openPopupShortcutId = 'open-popup-shortcut';
         this._startupCompleteId = null;
-    }
-
-    _initUI() {
-        this._model = new WindowModel();
-        this._appMenuButton = new AppMenuButton({ model: this._model, extension: this });
-        this._windowIconList = new WindowIconList({ model: this._model, iconSize: 24 });
-    }
-
-    _addIndicatorsToPanel(position) {
-        Main.panel.addToStatusArea(this.uuid + '-AppMenuButton', this._appMenuButton, 0, position);
-        Main.panel.addToStatusArea(this.uuid + '-WindowIconList', this._windowIconList.wrapperButton, 1, position);
-    }
-
-    _destroyUI() {
-        if (this._appMenuButton) this._appMenuButton.destroy();
-        if (this._windowIconList) this._windowIconList.destroy();
-        if (this._model) this._model.destroy();
-    }
-
-    _moveDateMenu(position) {
-        const panel = Main.panel;
-        const dateMenu = Main.panel.statusArea.dateMenu;
-        if (!dateMenu) return;
-
-        // Remove the clock from the current parent
-        if (dateMenu.container.get_parent()) {
-            dateMenu.container.get_parent().remove_child(dateMenu.container);
-        }
-
-        switch (position) {
-            case 'left':
-                panel._leftBox.insert_child_at_index(dateMenu.container, 0);
-                break;
-
-            case 'right':
-                const rightBoxChildren = panel._rightBox.get_children();
-
-                if (rightBoxChildren.length > 0) {
-                    panel._rightBox.insert_child_below(dateMenu.container, rightBoxChildren[rightBoxChildren.length - 1]);
-                } else {
-                    panel._rightBox.add_child(dateMenu.container);
-                }
-                break;
-
-            case 'center':
-            default:
-                panel._centerBox.insert_child_at_index(dateMenu.container, 0);
-                break;
-        }
-    }
-    _applyOverviewSetting() {
-        if (!this._settings.get_boolean('show-overview-at-startup') && Main.layoutManager._startingUp) {
+        this._disposer = null;
+        if (this.settings.get_boolean('hide-overview-at-startup')) {
             this._startupCompleteId = Main.layoutManager.connect('startup-complete', () => {
-                Main.overview.hide();
+                if (Main.overview.visible) {
+                    Main.overview.hide();
+                }
                 if (this._startupCompleteId) {
                     Main.layoutManager.disconnect(this._startupCompleteId);
+                    this._startupCompleteId = null;
                 }
             });
         }
+        this._disposer = this._buildAndWireUI();
+        this._bindShortcuts();
     }
 
-    _connectSettingsChanges() {
-        this._settingsChangedId = this._settings.connect('changed', () => this._restart());
-    }
-
-    _disconnectSettingsChanges() {
-        if (this._settingsChangedId) {
-            this._settings.disconnect(this._settingsChangedId);
-        }
+    disable() {
+        this._unbindShortcuts();
         if (this._startupCompleteId) {
             Main.layoutManager.disconnect(this._startupCompleteId);
+            this._startupCompleteId = null;
         }
+        this._disposer?.();
+        this._disposer = null;
+        this.appMenuButton = null;
     }
 
-    _restart() {
-        this.disable();
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            this.enable();
-            return GLib.SOURCE_REMOVE;
+    _bindShortcuts() {
+        Main.wm.addKeybinding(
+            this.openPopupShortcutId,
+            this.settings,
+            Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+            Shell.ActionMode.NORMAL,
+            () => {
+                this.appMenuButton?.menu.toggle();
+            }
+        );
+    }
+
+    _unbindShortcuts() {
+        Main.wm.removeKeybinding(this.openPopupShortcutId);
+    }
+
+    _buildAndWireUI() {
+        const sessionResources = { models: [], listeners: [] };
+        const createSettingTimeline = (source, key, type) => {
+            const getValue = () => {
+                if (type === 'strv') return source.get_strv(key);
+                if (type === 'boolean') return source.get_boolean(key);
+                if (type === 'integer') return source.get_int(key);
+                return source.get_string(key);
+            };
+            const timeline = Timeline(getValue());
+            const id = source.connect(`changed::${key}`, () => timeline.define(Now, getValue()));
+            sessionResources.listeners.push({ source, id });
+            return timeline;
+        };
+
+        const windowModel = new WindowModel();
+        sessionResources.models.push(windowModel);
+
+        const favoritesTimeline = createSettingTimeline(this.favsSettings, 'favorite-apps', 'strv');
+        const showWindowIconListTimeline = createSettingTimeline(this.settings, 'show-window-icon-list', 'boolean');
+        const mainIconPosTimeline = createSettingTimeline(this.settings, 'main-icon-position', 'string');
+        const mainIconRankTimeline = createSettingTimeline(this.settings, 'main-icon-rank', 'integer');
+        const dateMenuPosTimeline = createSettingTimeline(this.settings, 'date-menu-position', 'string');
+        const dateMenuRankTimeline = createSettingTimeline(this.settings, 'date-menu-rank', 'integer');
+
+        const mainIconPlacementTimeline = combineLatestWith((p, r) => ({ p, r }))(mainIconPosTimeline)(mainIconRankTimeline);
+        const dateMenuPlacementTimeline = combineLatestWith((p, r) => ({ p, r }))(dateMenuPosTimeline)(dateMenuRankTimeline);
+
+        this.appMenuButton = new AppMenuButton({
+            extension: this,
+            settings: this.settings,
+            windowsTimeline: windowModel.windowsTimeline,
+            favoritesTimeline: favoritesTimeline
         });
+
+        mainIconPlacementTimeline.map(({ p, r }) => {
+            if (this.appMenuButton.is_destroyed) return;
+            Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this.appMenuButton, r, p);
+        });
+
+        let windowIconListWidget = null;
+
+        // ▼▼▼ combineLatestWithのネストで3つのTimelineを正しく結合
+        const combinedWinAndFavs = combineLatestWith(
+            (windowGroups, favs) => ({ windowGroups, favs })
+        )(windowModel.windowsTimeline)(favoritesTimeline);
+        const iconListDataTimeline = combineLatestWith(
+            (winFavs, show) => ({ ...winFavs, show })
+        )(combinedWinAndFavs)(showWindowIconListTimeline);
+        // ▲▲▲
+
+        iconListDataTimeline.map(({ windowGroups, favs, show }) => {
+            const { p, r } = mainIconPlacementTimeline.at(Now);
+
+            // 表示設定が false ならウィジェットを破棄
+            if (!show) {
+                if (windowIconListWidget) {
+                    windowIconListWidget.destroy();
+                    windowIconListWidget = null;
+                }
+                return;
+            }
+
+            // ウィジェットがなければ作成し、パネルに追加
+            if (!windowIconListWidget) {
+                windowIconListWidget = new WindowIconListIndicator();
+                Main.panel.addToStatusArea(`${this.uuid}-WindowIconList`, windowIconListWidget, r + 1, p);
+            }
+
+            // ソートされたデータでUIを更新
+            if (windowIconListWidget && !windowIconListWidget.is_destroyed) {
+                const sortedGroups = this._sortWindowGroups([...windowGroups], favs);
+                windowIconListWidget.update(sortedGroups);
+            }
+        });
+
+        dateMenuPlacementTimeline.map(({ p, r }) => {
+            const dateMenu = Main.panel.statusArea.dateMenu;
+            if (!dateMenu) return;
+            const targetBox = Main.panel[`_${p}Box`];
+            if (!targetBox) return;
+            if (dateMenu.get_parent()) dateMenu.get_parent().remove_child(dateMenu);
+            targetBox.insert_child_at_index(dateMenu, r);
+        });
+
+        return () => {
+            sessionResources.listeners.forEach(l => {
+                try { if (l.source && l.id) l.source.disconnect(l.id); } catch (e) { }
+            });
+            try {
+                const dateMenu = Main.panel.statusArea.dateMenu;
+                if (dateMenu?.get_parent()) dateMenu.get_parent().remove_child(dateMenu);
+                Main.panel._centerBox.insert_child_at_index(dateMenu, 0);
+            } catch (e) { }
+            this.appMenuButton?.destroy();
+            windowIconListWidget?.destroy();
+            sessionResources.models.forEach(m => { try { m.destroy(); } catch (e) { } });
+        };
+    }
+
+    // --- 共通の一次ソート関数 ---
+    _sortWindowGroups(windowGroups, favoriteAppIds) {
+        const favoriteOrder = new Map(favoriteAppIds.map((id, index) => [id, index]));
+        windowGroups.sort((a, b) => {
+            const favIndexA = favoriteOrder.get(a.app.get_id());
+            const favIndexB = favoriteOrder.get(b.app.get_id());
+            const aIsFav = favIndexA !== undefined;
+            const bIsFav = favIndexB !== undefined;
+            if (aIsFav && !bIsFav) return -1;
+            if (!aIsFav && bIsFav) return 1;
+            if (aIsFav && bIsFav) {
+                return favIndexA - favIndexB;
+            }
+            return 0;
+        });
+        return windowGroups;
+    }
+
+    _toggleFavorite(appId) {
+        let favorites = this.favsSettings.get_strv('favorite-apps');
+        const index = favorites.indexOf(appId);
+        if (index === -1) favorites.push(appId);
+        else favorites.splice(index, 1);
+        this.favsSettings.set_strv('favorite-apps', favorites);
     }
 }

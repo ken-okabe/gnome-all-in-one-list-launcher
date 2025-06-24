@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.all-in-one-ken-okabe" path="/org/gnome/shell/extensions/all-in-one-ken-okabe/">
+
+    <key name="main-icon-position" type="s"><default>'center'</default></key>
+    <key name="main-icon-rank" type="i"><default>0</default></key>
+    <key name="date-menu-position" type="s"><default>'right'</default></key>
+    <key name="date-menu-rank" type="i"><default>-1</default></key>
+    <key name="show-window-icon-list" type="b"><default>true</default></key>
+    <key name="hide-overview-at-startup" type="b"><default>true</default></key>
+
+    <key name="shortcut-0" type="as"><default>[]</default></key>
+    <key name="shortcut-1" type="as"><default>[]</default></key>
+    <key name="shortcut-2" type="as"><default>[]</default></key>
+    <key name="shortcut-3" type="as"><default>[]</default></key>
+    <key name="shortcut-4" type="as"><default>[]</default></key>
+    <key name="shortcut-5" type="as"><default>[]</default></key>
+    <key name="shortcut-6" type="as"><default>[]</default></key>
+    <key name="shortcut-7" type="as"><default>[]</default></key>
+    <key name="shortcut-8" type="as"><default>[]</default></key>
+    <key name="shortcut-9" type="as"><default>[]</default></key>
+    <key name="shortcut-10" type="as"><default>[]</default></key>
+    <key name="shortcut-11" type="as"><default>[]</default></key>
+    <key name="shortcut-12" type="as"><default>[]</default></key>
+    <key name="shortcut-13" type="as"><default>[]</default></key>
+    <key name="shortcut-14" type="as"><default>[]</default></key>
+    <key name="shortcut-15" type="as"><default>[]</default></key>
+    <key name="shortcut-16" type="as"><default>[]</default></key>
+    <key name="shortcut-17" type="as"><default>[]</default></key>
+    <key name="shortcut-18" type="as"><default>[]</default></key>
+    <key name="shortcut-19" type="as"><default>[]</default></key>
+    <key name="shortcut-20" type="as"><default>[]</default></key>
+    <key name="shortcut-21" type="as"><default>[]</default></key>
+    <key name="shortcut-22" type="as"><default>[]</default></key>
+    <key name="shortcut-23" type="as"><default>[]</default></key>
+    <key name="shortcut-24" type="as"><default>[]</default></key>
+    <key name="shortcut-25" type="as"><default>[]</default></key>
+    <key name="shortcut-26" type="as"><default>[]</default></key>
+    <key name="shortcut-27" type="as"><default>[]</default></key>
+    <key name="shortcut-28" type="as"><default>[]</default></key>
+    <key name="shortcut-29" type="as"><default>[]</default></key>
+
+    <key name="open-popup-shortcut" type="as"><default>[]</default></key>
+
+  </schema>
+</schemalist>

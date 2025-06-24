@@ -14,5 +14,6 @@
     "50"
   ],
   "preferences_ui": "prefs.js",
-  "settings-schema": "org.gnome.shell.extensions.all-in-one-ken-okabe"
+  "settings-schema": "org.gnome.shell.extensions.all-in-one-ken-okabe",
+  "stylesheet": "stylesheet.css"
 }

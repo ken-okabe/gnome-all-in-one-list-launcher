@@ -1,0 +1,76 @@
+/* お気に入りバーのボタンの基本スタイル */
+.favorite-button {
+    padding: 4px;
+    border-radius: 6px;
+    transition: background-color 150ms ease-out;
+}
+
+.favorite-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.favorite-button.selected {
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* 閉じるボタンの表示制御 */
+.window-close-button {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 4px;
+    border-radius: 4px;
+    color: transparent;
+    transition: opacity 200ms ease-out, visibility 200ms ease-out, color 200ms ease-out, background-color 150ms ease-out;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    background-color: transparent;
+    border: none;
+}
+
+.window-list-item:hover .window-close-button,
+.window-list-item:focus .window-close-button {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    color: white;
+}
+
+.window-list-item .window-close-button:hover {
+    color: #C01C28;
+    background-color: rgba(192, 28, 40, 0.2);
+}
+
+/* ヘッダーのスタイル調整 */
+.window-list-header-icon {
+    margin-right: 8px;
+}
+
+.window-list-header-title {
+    font-weight: bold;
+}
+
+/* ボタン間のスペース調整 */
+.favorite-star-button {
+    margin-left: 4px;
+    transition: color 150ms ease-out;
+}
+
+.favorite-star-button:hover {
+    color: #E5A50A;
+}
+
+.favorite-star-button .popup-menu-icon {
+    icon-size: 16px;
+}
+
+/* パネル上のアイコンリストのスタイル */
+.window-icon-list-container {
+    spacing: 2px;
+}
+
+.window-icon-list-container .system-status-icon {
+    icon-size: 20px;
+}
