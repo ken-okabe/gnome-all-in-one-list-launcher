@@ -282,6 +282,11 @@ const AppMenuButton = GObject.registerClass(
                         can_focus: false,
                         track_hover: true,
                     });
+                    // ★★★ この3行を追記 ★★★
+                    button.connect('clicked', () => {
+                        this._launchNewInstance(app);
+                    });
+
                     if (index === selectedIndex) {
                         button.add_style_class_name('selected');
                     }
