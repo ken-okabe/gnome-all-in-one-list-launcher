@@ -282,10 +282,17 @@ const AppMenuButton = GObject.registerClass(
                         can_focus: false,
                         track_hover: true,
                     });
-                    // ★★★ この3行を追記 ★★★
+                    // 1. マウスホバー時の処理
+                    button.connect('enter-event', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                    });
+
+                    // 2. マウスクリック時の処理
                     button.connect('clicked', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
                         this._launchNewInstance(app);
                     });
+
 
                     if (index === selectedIndex) {
                         button.add_style_class_name('selected');
