@@ -289,7 +289,6 @@ const AppMenuButton = GObject.registerClass(
 
                     // 2. マウスクリック時の処理
                     button.connect('clicked', () => {
-                        this._selectedFavoriteIndexTimeline.define(Now, index);
                         this._launchNewInstance(app);
                     });
 
