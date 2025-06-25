@@ -12,7 +12,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Timeline, Now, combineLatestWith } from './timeline.js';
 
-// --- NonClosingPopupBaseMenuItem Class  ---
+// --- NonClosingPopupBaseMenuItem Class (変更なし) ---
 const NonClosingPopupBaseMenuItem = GObject.registerClass({
     Signals: {
         'custom-activate': {},
@@ -85,10 +85,7 @@ const WindowModel = GObject.registerClass(
         }
     });
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ UIコンポーネントクラス RunningAppsIndicator (合意仕様版) ★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// アイコンを並べるためのレイアウト用クラス
+// --- RunningAppsIndicator & RunningAppsIconList Class (変更なし) ---
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
         _init() {
@@ -118,7 +115,6 @@ const RunningAppsIconList = GObject.registerClass(
     }
 );
 
-// パネルに追加するための、上記クラスを内包するボタンクラス
 const RunningAppsIndicator = GObject.registerClass(
     class RunningAppsIndicator extends PanelMenu.Button {
         _init({ windowsTimeline }) {
@@ -372,60 +368,177 @@ const AppMenuButton = GObject.registerClass(
     }
 );
 
-// ★★★★★ メインの拡張機能クラス (Timeline.bindによるライフサイクル管理とIndicatorの追加) ★★★★★
+// ★★★★★ メインの拡張機能クラス (バグ修正・全体版) ★★★★★
+// ★★★★★ メインの拡張機能クラス (最終修正版) ★★★★★
 export default class MinimalTimelineExtension extends Extension {
     constructor(metadata) {
         super(metadata);
         this._appMenuButton = null;
-        this._runningAppsIndicator = null; // ★ Indicatorのプロパティを追加
+        this._runningAppsIndicator = null;
         this._windowModel = null;
         this._favsSettings = null;
         this._lifecycleTimeline = null;
-        this._favsConnectionId = null;
+
+        this._gsettingsConnections = [];
+        this._shortcutId = null;
+        this._startupSignalId = null;
     }
 
-    _createSettingTimeline(settings, key) {
-        const t = Timeline(settings.get_strv(key));
-        const id = settings.connect(`changed::${key}`, () => t.define(Now, settings.get_strv(key)));
-        return { timeline: t, GSettingConnectionId: id };
+    _createSettingTimeline(source, key, type = 'string') {
+        const getValue = () => {
+            switch (type) {
+                case 'strv': return source.get_strv(key);
+                case 'boolean': return source.get_boolean(key);
+                case 'integer': return source.get_int(key);
+                default: return source.get_string(key);
+            }
+        };
+        const timeline = Timeline(getValue());
+        const id = source.connect(`changed::${key}`, () => timeline.define(Now, getValue()));
+        this._gsettingsConnections.push({ source, id });
+        return timeline;
     }
 
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
-        const favsInfo = this._createSettingTimeline(this._favsSettings, 'favorite-apps');
-        this._favsConnectionId = favsInfo.GSettingConnectionId;
 
-        // Timeline.bind を使ってリソースの生成と破棄を管理
         this._lifecycleTimeline.bind(isEnabled => {
             if (isEnabled) {
-                // isEnabledがtrueの時にリソースを生成
                 this._windowModel = new WindowModel();
 
-                // AppMenuButtonを生成
+                const extSettings = this.getSettings();
+                const favoritesTimeline = this._createSettingTimeline(this._favsSettings, 'favorite-apps', 'strv');
+                const mainIconPosTimeline = this._createSettingTimeline(extSettings, 'main-icon-position');
+                const mainIconRankTimeline = this._createSettingTimeline(extSettings, 'main-icon-rank', 'integer');
+                const dateMenuPosTimeline = this._createSettingTimeline(extSettings, 'date-menu-position');
+                const dateMenuRankTimeline = this._createSettingTimeline(extSettings, 'date-menu-rank', 'integer');
+                const showWindowIconListTimeline = this._createSettingTimeline(extSettings, 'show-window-icon-list', 'boolean');
+                const hideOverviewTimeline = this._createSettingTimeline(extSettings, 'hide-overview-at-startup', 'boolean');
+                const openPopupShortcutTimeline = this._createSettingTimeline(extSettings, 'open-popup-shortcut', 'strv');
+
+                const mainIconPlacementTimeline = combineLatestWith((p, r) => ({ pos: p, rank: r }))(mainIconPosTimeline)(mainIconRankTimeline);
+                const dateMenuPlacementTimeline = combineLatestWith((p, r) => ({ pos: p, rank: r }))(dateMenuPosTimeline)(dateMenuRankTimeline);
+
                 this._appMenuButton = new AppMenuButton({
                     windowsTimeline: this._windowModel.windowsTimeline,
-                    favoritesTimeline: favsInfo.timeline,
+                    favoritesTimeline: favoritesTimeline,
                     extension: this,
-                    settings: this.getSettings(),
+                    settings: extSettings,
                 });
-                Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this._appMenuButton, 0, 'left');
-
-                // ★ RunningAppsIndicatorを生成
-                this._runningAppsIndicator = new RunningAppsIndicator({
-                    windowsTimeline: this._windowModel.windowsTimeline,
+                mainIconPlacementTimeline.map(({ pos, rank }) => {
+                    if (this._appMenuButton?.is_destroyed === false) {
+                        const container = this._appMenuButton.get_parent();
+                        if (container) {
+                            container.remove_child(this._appMenuButton);
+                        }
+                        Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this._appMenuButton, rank, pos);
+                    }
                 });
-                Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, 1, 'left');
 
-            } else {
-                // isEnabledがfalseになったらUIとモデルを全て破棄
-                // このブロックが、bindによって自動的に呼び出される
+                // --- ▼▼▼ ここからが最終修正箇所 ▼▼▼ ---
+
+                // 1. _runningAppsIndicator の全状態を単一のTimelineに合成
+                //    combineLatestWith をカリー化された正しい形式で呼び出す
+                const indicatorStateTimeline = combineLatestWith(
+                    (show, placement) => ({
+                        show,
+                        pos: placement.pos,
+                        rank: placement.rank,
+                    })
+                )(showWindowIconListTimeline)(mainIconPlacementTimeline);
+
+
+                // 2. 合成された単一のTimelineを購読し、UIを一元管理する
+                indicatorStateTimeline.map(({ show, pos, rank }) => {
+                    if (show) {
+                        // 表示がONの場合
+                        if (!this._runningAppsIndicator) {
+                            // ウィジェットが存在しない場合のみ生成
+                            this._runningAppsIndicator = new RunningAppsIndicator({
+                                windowsTimeline: this._windowModel.windowsTimeline,
+                            });
+                        }
+                        // 配置を更新 (必ず一度親から削除してから追加する)
+                        const container = this._runningAppsIndicator.get_parent();
+                        if (container) {
+                            container.remove_child(this._runningAppsIndicator);
+                        }
+                        Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, rank + 1, pos);
+                    } else {
+                        // 表示がOFFの場合
+                        if (this._runningAppsIndicator) {
+                            // ウィジェットが存在すれば完全に破棄してnullにする
+                            this._runningAppsIndicator.destroy();
+                            this._runningAppsIndicator = null;
+                        }
+                    }
+                });
+
+                // --- ▲▲▲ 修正箇所ここまで ▲▲▲ ---
+
+                dateMenuPlacementTimeline.map(({ pos, rank }) => {
+                    const dateMenu = Main.panel.statusArea.dateMenu;
+                    if (!dateMenu) return;
+                    const container = dateMenu.get_parent();
+                    if (container) {
+                        container.remove_child(dateMenu);
+                    }
+                    Main.panel[`_${pos}Box`].insert_child_at_index(dateMenu, rank);
+                });
+
+                openPopupShortcutTimeline.map(shortcut => {
+                    if (this._shortcutId) {
+                        Main.wm.removeKeybinding(this._shortcutId);
+                        this._shortcutId = null;
+                    }
+                    if (shortcut && shortcut[0]) {
+                        this._shortcutId = 'open-popup-shortcut';
+                        Main.wm.addKeybinding(
+                            this._shortcutId,
+                            extSettings,
+                            Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+                            Shell.ActionMode.NORMAL,
+                            () => this._appMenuButton?.menu.toggle()
+                        );
+                    }
+                });
+
+                hideOverviewTimeline.map(shouldHide => {
+                    if (shouldHide && !this._startupSignalId) {
+                        this._startupSignalId = Main.layoutManager.connect('startup-complete', () => {
+                            if (Main.overview.visible) Main.overview.hide();
+                        });
+                    } else if (!shouldHide && this._startupSignalId) {
+                        Main.layoutManager.disconnect(this._startupSignalId);
+                        this._startupSignalId = null;
+                    }
+                });
+
+            } else { // isEnabledがfalseの時のクリーンアップ処理
                 this._appMenuButton?.destroy();
                 this._appMenuButton = null;
-                this._runningAppsIndicator?.destroy(); // ★ Indicatorも破棄
+                this._runningAppsIndicator?.destroy();
                 this._runningAppsIndicator = null;
                 this._windowModel?.destroy();
                 this._windowModel = null;
+
+                if (this._shortcutId) {
+                    Main.wm.removeKeybinding(this._shortcutId);
+                    this._shortcutId = null;
+                }
+                if (this._startupSignalId) {
+                    Main.layoutManager.disconnect(this._startupSignalId);
+                    this._startupSignalId = null;
+                }
+                const dateMenu = Main.panel.statusArea.dateMenu;
+                if (dateMenu) {
+                    const container = dateMenu.get_parent();
+                    if (container) {
+                        container.remove_child(dateMenu);
+                    }
+                    Main.panel._centerBox.insert_child_at_index(dateMenu, 0);
+                }
             }
             return Timeline(null);
         });
@@ -434,10 +547,14 @@ export default class MinimalTimelineExtension extends Extension {
     disable() {
         this._lifecycleTimeline?.define(Now, false);
         this._lifecycleTimeline = null;
-        if (this._favsSettings && this._favsConnectionId) {
-            this._favsSettings.disconnect(this._favsConnectionId);
-            this._favsConnectionId = null;
-        }
+
+        this._gsettingsConnections.forEach(({ source, id }) => {
+            try {
+                if (source && id) source.disconnect(id);
+            } catch (e) { /* ignore */ }
+        });
+        this._gsettingsConnections = [];
+
         this._favsSettings = null;
     }
 
