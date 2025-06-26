@@ -13,7 +13,6 @@ import {
 
 const MAX_FAVORITES = 30;
 
-// ★★★ KeybindingDialogクラス全体を修正（クリア機能追加＆制限強化） ★★★
 const KeybindingDialog = GObject.registerClass(
     class KeybindingDialog extends Gtk.Dialog {
         _init(params) {
@@ -44,7 +43,7 @@ const KeybindingDialog = GObject.registerClass(
 
             this.shortcutDisplayBox = new Gtk.Box({
                 orientation: Gtk.Orientation.HORIZONTAL,
-                spacing: 6,
+                spacing: 12,
                 halign: Gtk.Align.CENTER,
                 valign: Gtk.Align.CENTER,
                 css_classes: ['key-display-box'],
@@ -52,21 +51,24 @@ const KeybindingDialog = GObject.registerClass(
             });
             contentBox.append(this.shortcutDisplayBox);
 
-            this.keyIllustrationLabel = new Gtk.Label({
+            this.shortcutLabel = new Gtk.Label({
                 label: _('Press keys to set shortcut'),
                 css_classes: ['dim-label'],
+                hexpand: true,
+                xalign: 0.5,
             });
-            this.shortcutDisplayBox.append(this.keyIllustrationLabel);
+            this.shortcutDisplayBox.append(this.shortcutLabel);
 
             const clearButton = new Gtk.Button({
                 icon_name: 'edit-clear-symbolic',
                 valign: Gtk.Align.CENTER,
                 css_classes: ['flat'],
                 tooltip_text: _('Clear Shortcut'),
+                // ★ 1. クリアボタンがキーボードフォーカスを受け取らないように設定
+                can_focus: false,
             });
             clearButton.connect('clicked', () => this._clearShortcut());
-            const header = this.get_header_bar();
-            header.pack_start(clearButton);
+            this.shortcutDisplayBox.append(clearButton);
 
             this.cancelButton = this.add_button(_('Cancel'), Gtk.ResponseType.CANCEL);
             this.setButton = this.add_button(_('Set'), Gtk.ResponseType.OK);
@@ -117,9 +119,10 @@ const KeybindingDialog = GObject.registerClass(
                 const binding = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
                 this._setShortcut(binding);
                 this.setButton.set_sensitive(true);
+                // ★ 2. ショートカット設定後、Setボタンにフォーカスを移動
+                this.setButton.grab_focus();
             } else {
-                this._setShortcut('');
-                this.setButton.set_sensitive(false);
+                this._clearShortcut();
             }
 
             return Gdk.EVENT_STOP;
@@ -127,7 +130,9 @@ const KeybindingDialog = GObject.registerClass(
 
         _clearShortcut() {
             this._setShortcut('');
-            this.setButton.set_sensitive(false);
+            this.setButton.set_sensitive(true);
+            // ★ 2. クリア後も、Setボタンにフォーカスを移動
+            this.setButton.grab_focus();
         }
 
         _isModifier(keyval) {
@@ -139,24 +144,19 @@ const KeybindingDialog = GObject.registerClass(
 
         _setShortcut(accelerator) {
             this._currentAccelerator = accelerator;
-
-            if (this.keyIllustrationLabel.get_parent()) {
-                this.shortcutDisplayBox.remove(this.keyIllustrationLabel);
-            }
-            let child;
-            while ((child = this.shortcutDisplayBox.get_first_child())) {
-                this.shortcutDisplayBox.remove(child);
-            }
             if (accelerator) {
                 const prettyString = accelerator
                     .replace(/</g, '')
                     .replace(/>/g, ' + ')
                     .replace(/_L$|_R$/, '')
                     .replace(/\s\+\s*$/, '');
-                const label = new Gtk.Label({ label: prettyString, css_classes: ['key-label'] });
-                this.shortcutDisplayBox.append(label);
+                this.shortcutLabel.set_label(prettyString);
+                this.shortcutLabel.get_style_context().remove_class('dim-label');
+                this.shortcutLabel.get_style_context().add_class('key-label');
             } else {
-                this.shortcutDisplayBox.append(this.keyIllustrationLabel);
+                this.shortcutLabel.set_label(_('Press keys to set shortcut'));
+                this.shortcutLabel.get_style_context().remove_class('key-label');
+                this.shortcutLabel.get_style_context().add_class('dim-label');
             }
         }
 
@@ -170,6 +170,8 @@ const KeybindingDialog = GObject.registerClass(
             if (accelerator) {
                 this._setShortcut(accelerator);
                 this.setButton.set_sensitive(true);
+            } else {
+                this._clearShortcut();
             }
         }
 
@@ -178,7 +180,6 @@ const KeybindingDialog = GObject.registerClass(
         }
     }
 );
-
 
 export default class AllWindowsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
