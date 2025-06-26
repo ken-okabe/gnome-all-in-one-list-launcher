@@ -246,66 +246,210 @@ const AppMenuButton = GObject.registerClass(
         }
 
         /**
-         * アプリの起動プロセスを開始します。
-         * Promiseのthen/catchを使用して、成功・失敗をハンドリングします。
-         * @param {object} app - 起動するアプリケーションオブジェクト。
+         * アプリケーションの新規インスタンス起動プロセスを開始します。
+         * @param {Shell.App} app - 起動するアプリケーションオブジェクト。
          */
+        // _launchNewInstance(app) {
+        //     if (this._isDestroyed) {
+        //         console.warn("Attempted to launch on a destroyed instance.");
+        //         return;
+        //     }
+
+        //     console.log(`Starting sequential launch attempts for app: ${app.get_id()}`);
+
+        //     const self = this;
+
+        //     // 各試行の結果を受け取るTimeline
+        //     const attempt1Result = Timeline(null);
+        //     const attempt2Result = Timeline(null);
+        //     const attempt3Result = Timeline(null);
+        //     const attempt4Result = Timeline(null);
+        //     const finalResult = Timeline(null);
+
+        //     // 初期値でチェーンを開始
+        //     const initialTrigger = Timeline({ app, attemptNumber: 1 });
+
+        //     const launchChain = initialTrigger
+        //         .bind(({ app, attemptNumber }) => {
+        //             console.log(`--- Attempt ${attemptNumber}: request_new_window ---`);
+
+        //             // 非同期的に結果を決定
+        //             setTimeout(() => {
+        //                 try {
+        //                     app.request_new_window(-1, null);
+        //                     console.log("✅ request_new_window succeeded");
+        //                     // 成功時は最終結果に成功を通知
+        //                     finalResult.define(Now, { success: true, method: 'request_new_window' });
+        //                 } catch (e) {
+        //                     console.warn(`❌ request_new_window failed: ${e.message}`);
+        //                     // 失敗時は次の試行をトリガー
+        //                     attempt1Result.define(Now, { app, attemptNumber: 2 });
+        //                 }
+        //             }, 10); // 短い遅延で非同期処理をシミュレート
+
+        //             return attempt1Result;
+        //         })
+        //         .bind(({ app, attemptNumber }) => {
+        //             if (attemptNumber !== 2) return attempt2Result; // 既に成功している場合はスキップ
+
+        //             console.log(`--- Attempt ${attemptNumber}: activate_action ---`);
+
+        //             setTimeout(() => {
+        //                 try {
+        //                     app.activate_action('new-window', [], -1);
+        //                     console.log("✅ activate_action succeeded");
+        //                     finalResult.define(Now, { success: true, method: 'activate_action' });
+        //                 } catch (e) {
+        //                     console.warn(`❌ activate_action failed: ${e.message}`);
+        //                     attempt2Result.define(Now, { app, attemptNumber: 3 });
+        //                 }
+        //             }, 10);
+
+        //             return attempt2Result;
+        //         })
+        //         .bind(({ app, attemptNumber }) => {
+        //             if (attemptNumber !== 3) return attempt3Result; // 既に成功している場合はスキップ
+
+        //             console.log(`--- Attempt ${attemptNumber}: command_line ---`);
+
+        //             setTimeout(() => {
+        //                 try {
+        //                     const appId = app.get_id();
+        //                     let command = null;
+
+        //                     // アプリケーション固有のコマンドを設定
+        //                     if (appId === 'org.gnome.Nautilus.desktop') {
+        //                         command = 'nautilus --new-window';
+        //                     } else if (appId === 'org.gnome.Terminal.desktop') {
+        //                         command = 'gnome-terminal --window';
+        //                     } else if (appId === 'org.gnome.Console.desktop') {
+        //                         command = 'kgx';
+        //                     } else {
+        //                         // 汎用的なコマンド生成
+        //                         const executableName = app.get_app_info().get_executable();
+        //                         command = executableName ? `${executableName} --new-window` : null;
+        //                     }
+
+        //                     if (command) {
+        //                         console.log(`  Executing command: ${command}`);
+        //                         GLib.spawn_command_line_async(command);
+        //                         console.log("✅ command_line succeeded");
+        //                         finalResult.define(Now, { success: true, method: 'command_line' });
+        //                     } else {
+        //                         throw new Error("No suitable command found");
+        //                     }
+        //                 } catch (e) {
+        //                     console.warn(`❌ command_line failed: ${e.message}`);
+        //                     attempt3Result.define(Now, { app, attemptNumber: 4 });
+        //                 }
+        //             }, 10);
+
+        //             return attempt3Result;
+        //         })
+        //         .bind(({ app, attemptNumber }) => {
+        //             if (attemptNumber !== 4) return attempt4Result; // 既に成功している場合はスキップ
+
+        //             console.log(`--- Attempt ${attemptNumber}: fallback launch ---`);
+
+        //             setTimeout(() => {
+        //                 try {
+        //                     app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
+        //                     console.log("✅ fallback launch succeeded");
+        //                     finalResult.define(Now, { success: true, method: 'launch' });
+        //                 } catch (e) {
+        //                     console.error(`💥 All launch attempts failed. Final error: ${e.message}`);
+        //                     finalResult.define(Now, {
+        //                         success: false,
+        //                         error: e.message,
+        //                         appName: app.get_name()
+        //                     });
+        //                 }
+        //             }, 10);
+
+        //             return attempt4Result;
+        //         });
+
+        //     // 最終結果の処理
+        //     finalResult.map(result => {
+        //         if (result.success) {
+        //             console.log(`🎉 Application launched successfully using method: ${result.method}`);
+        //             // 成功時の追加処理があればここに記述
+        //         } else {
+        //             console.error(`💥 Failed to launch ${result.appName}: ${result.error}`);
+        //             Main.notify('Error launching application', `Could not launch ${result.appName}`);
+        //         }
+        //         return result;
+        //     });
+
+        //     // チェーンを開始
+        //     initialTrigger.define(Now, { app, attemptNumber: 1 });
+        // }
+
+        // より簡潔な代替実装（Timelineを使わない場合）
         _launchNewInstance(app) {
-            // インスタンスが破棄されている場合は、処理を中断します。
             if (this._isDestroyed) {
                 console.warn("Attempted to launch on a destroyed instance.");
                 return;
             }
 
-            // Promiseを返す関数を呼び出し、その結果をチェーンで処理します。
-            this._promiseTryLaunchNew(app)
-                .then(() => {
-                    // Promiseがresolveされた場合（成功時）の処理
-                    console.log(`Launch sequence successfully initiated for app: ${app.get_id()}`);
-                })
-                .catch((error) => {
-                    // Promiseがrejectされた場合（失敗時）の処理
-                    console.error(`Error during the launch process for app: ${app.get_id()}`, error);
-                });
+            const launchMethods = [
+                {
+                    name: 'request_new_window',
+                    execute: (app) => app.request_new_window(-1, null)
+                },
+                // {  // Promiseを返す activate_action API を完全に除外
+                //     name: 'activate_action',
+                //     execute: (app) => app.activate_action('new-window', [], -1)
+                // },
+                {
+                    name: 'command_line',
+                    execute: (app) => {
+                        const appId = app.get_id();
+                        let command = null;
+
+                        if (appId === 'org.gnome.Nautilus.desktop') {
+                            command = 'nautilus --new-window';
+                        } else if (appId === 'org.gnome.Terminal.desktop') {
+                            command = 'gnome-terminal --window';
+                        } else if (appId === 'org.gnome.Console.desktop') {
+                            command = 'kgx';
+                        }
+
+                        if (command) {
+                            GLib.spawn_command_line_async(command);
+                        } else {
+                            throw new Error("No suitable command found");
+                        }
+                    }
+                },
+                {
+                    name: 'fallback_launch',
+                    execute: (app) => app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT)
+                }
+            ];
+
+            const tryNextMethod = (methodIndex) => {
+                if (methodIndex >= launchMethods.length) {
+                    console.error("💥 All launch methods failed");
+                    Main.notify('Error launching application', `Could not launch ${app.get_name()}`);
+                    return;
+                }
+
+                const method = launchMethods[methodIndex];
+                console.log(`--- Attempting: ${method.name} ---`);
+
+                try {
+                    method.execute(app);
+                    console.log(`✅ ${method.name} succeeded`);
+                } catch (e) {
+                    console.warn(`❌ ${method.name} failed: ${e.message}`);
+                    // 次のメソッドを非同期で試行
+                    setTimeout(() => tryNextMethod(methodIndex + 1), 10);
+                }
+            };
+
+            tryNextMethod(0);
         }
-
-        /**
-         * 実際の起動処理をPromiseでラップします。
-         * Promiseコンストラクタは内部で発生した例外を自動的に捕捉し、Promiseをrejectするため、
-         * 明示的なtry...catchは不要です。
-         * @param {object} app - 起動するアプリケーションオブジェクト。
-         * @returns {Promise<void>} 起動処理の成功時にresolveし、失敗時にrejectするPromiseを返します。
-         */
-        _promiseTryLaunchNew(app) {
-            return new Promise((resolve, reject) => {
-                // _tryLaunchNewで同期的な例外がスローされると、このPromiseは自動的にrejectされます。
-                this._tryLaunchNew(app);
-                // 例外がなければ、Promiseはresolveされます。
-                resolve();
-            });
-        }
-
-        /**
-         * アプリケーションを起動するコアな処理です。
-         * 失敗した場合は、呼び出し元に例外をスローして通知します。
-         * 今後、複数のtry-catchブロックをここに追加していくことができます。
-         * @param {object} app - 起動するアプリケーションオブジェクト。
-         */
-        _tryLaunchNew(app) {
-            // ここに5つほどの連続したTry-Catchブロックを実装する予定の場所です。
-            try {
-                // 元の起動コマンドです。
-                app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
-
-            } catch (error) {
-                // エラーが発生した場合、それをログに出力します。
-                // その後、エラーを再スローすることで、呼び出し元（_promiseTryLaunchNew）に伝播させます。
-                console.error('An error occurred during the launch attempt and is being re-thrown.', error);
-                throw error;
-            }
-        }
-
-
 
         _updateFavoriteSelection(newIndex) {
             const oldIndex = this._lastSelectedIndex;
