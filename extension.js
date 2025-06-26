@@ -361,7 +361,134 @@ const AppMenuButton = GObject.registerClass(
     }
 );
 
-// ★ メインクラス (クリーンな状態へのリセット版)
+// ★ DateTime Clock Position Manager Class
+const DateTimeClockManager = GObject.registerClass(
+    class DateTimeClockManager extends GObject.Object {
+        _init() {
+            super._init();
+            this._originalDateMenu = null;
+            this._originalPosition = null;
+            this._originalRank = null;
+            this._isManaged = false;
+            this._currentTimelineCleanup = null;
+        }
+
+        manage(positionTimeline, rankTimeline) {
+            if (this._isManaged) {
+                this._cleanup();
+            }
+
+            this._isManaged = true;
+            this._originalDateMenu = Main.panel.statusArea.dateMenu;
+
+            if (this._originalDateMenu) {
+                // Store original position and rank
+                this._originalPosition = this._findOriginalPosition();
+                this._originalRank = this._findOriginalRank();
+
+                const combinedTimeline = combineLatestWith(
+                    (pos, rank) => ({ pos, rank })
+                )(positionTimeline)(rankTimeline);
+
+                this._currentTimelineCleanup = combinedTimeline.bind(({ pos, rank }) => {
+                    this._moveClockToPosition(pos, rank);
+                    return Timeline(null);
+                });
+            }
+        }
+
+        _findOriginalPosition() {
+            const dateMenu = this._originalDateMenu;
+            if (!dateMenu) return 'center';
+
+            // Check which panel section contains the dateMenu
+            if (Main.panel._leftBox.contains(dateMenu)) return 'left';
+            if (Main.panel._centerBox.contains(dateMenu)) return 'center';
+            if (Main.panel._rightBox.contains(dateMenu)) return 'right';
+
+            return 'center'; // Default fallback
+        }
+
+        _findOriginalRank() {
+            const dateMenu = this._originalDateMenu;
+            if (!dateMenu) return 0;
+
+            // Try to find the current index in the parent container
+            const parent = dateMenu.get_parent();
+            if (parent) {
+                const children = parent.get_children();
+                return children.indexOf(dateMenu);
+            }
+
+            return 0; // Default fallback
+        }
+
+        _moveClockToPosition(position, rank) {
+            const dateMenu = this._originalDateMenu;
+            if (!dateMenu) return;
+
+            // Remove from current position
+            const currentParent = dateMenu.get_parent();
+            if (currentParent) {
+                currentParent.remove_child(dateMenu);
+            }
+
+            // Get target container
+            let targetContainer;
+            switch (position) {
+                case 'left':
+                    targetContainer = Main.panel._leftBox;
+                    break;
+                case 'right':
+                    targetContainer = Main.panel._rightBox;
+                    break;
+                case 'center':
+                default:
+                    targetContainer = Main.panel._centerBox;
+                    break;
+            }
+
+            // Add to new position with specified rank
+            const children = targetContainer.get_children();
+            const targetIndex = Math.max(0, Math.min(rank, children.length));
+
+            if (targetIndex >= children.length) {
+                targetContainer.add_child(dateMenu);
+            } else {
+                targetContainer.insert_child_at_index(dateMenu, targetIndex);
+            }
+        }
+
+        _cleanup() {
+            if (this._currentTimelineCleanup) {
+                this._currentTimelineCleanup();
+                this._currentTimelineCleanup = null;
+            }
+        }
+
+        restore() {
+            if (!this._isManaged || !this._originalDateMenu) return;
+
+            this._cleanup();
+
+            // Restore to original position
+            if (this._originalPosition !== null && this._originalRank !== null) {
+                this._moveClockToPosition(this._originalPosition, this._originalRank);
+            }
+
+            this._isManaged = false;
+            this._originalDateMenu = null;
+            this._originalPosition = null;
+            this._originalRank = null;
+        }
+
+        destroy() {
+            this.restore();
+        }
+    }
+);
+
+// ★ メインクラス (DateTime Clock管理機能を追加)
 export default class MinimalTimelineExtension extends Extension {
     constructor(metadata) {
         super(metadata);
@@ -371,6 +498,7 @@ export default class MinimalTimelineExtension extends Extension {
         this._windowModel = null;
         this._favsSettings = null;
         this._gsettingsConnections = [];
+        this._dateTimeClockManager = null;
     }
 
     _onOpenPopupShortcut() {
@@ -423,6 +551,13 @@ export default class MinimalTimelineExtension extends Extension {
                 const mainIconRankTimeline = this._createIntSettingTimeline(settings, 'main-icon-rank');
                 const showIconListTimeline = this._createBooleanSettingTimeline(settings, 'show-window-icon-list');
 
+                // DateTime Clock管理の追加
+                const dateMenuPosTimeline = this._createStringSettingTimeline(settings, 'date-menu-position');
+                const dateMenuRankTimeline = this._createIntSettingTimeline(settings, 'date-menu-rank');
+
+                this._dateTimeClockManager = new DateTimeClockManager();
+                this._dateTimeClockManager.manage(dateMenuPosTimeline, dateMenuRankTimeline);
+
                 const posAndRankTimeline = combineLatestWith(
                     (pos, rank) => ({ pos, rank })
                 )(mainIconPosTimeline)(mainIconRankTimeline);
@@ -474,6 +609,8 @@ export default class MinimalTimelineExtension extends Extension {
                 this._runningAppsIndicator = null;
                 this._windowModel?.destroy();
                 this._windowModel = null;
+                this._dateTimeClockManager?.destroy();
+                this._dateTimeClockManager = null;
             }
             return Timeline(null);
         });
