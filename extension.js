@@ -360,130 +360,72 @@ const AppMenuButton = GObject.registerClass(
         destroy() { if (this._isDestroyed) return; this._isDestroyed = true; super.destroy(); }
     }
 );
-
 // ★ DateTime Clock Position Manager Class
 const DateTimeClockManager = GObject.registerClass(
     class DateTimeClockManager extends GObject.Object {
         _init() {
             super._init();
-            this._originalDateMenu = null;
+            this._originalDateMenu = Main.panel.statusArea.dateMenu;
             this._originalPosition = null;
             this._originalRank = null;
-            this._isManaged = false;
-            this._currentTimelineCleanup = null;
+
+            if (this._originalDateMenu) {
+                this._originalPosition = this._findOriginalPosition();
+                this._originalRank = this._findOriginalRank();
+            }
         }
 
         manage(positionTimeline, rankTimeline) {
-            if (this._isManaged) {
-                this._cleanup();
-            }
+            // Stop any previous management
 
-            this._isManaged = true;
-            this._originalDateMenu = Main.panel.statusArea.dateMenu;
 
-            if (this._originalDateMenu) {
-                // Store original position and rank
-                this._originalPosition = this._findOriginalPosition();
-                this._originalRank = this._findOriginalRank();
+            const combinedTimeline = combineLatestWith(
+                (pos, rank) => ({ pos, rank })
+            )(positionTimeline)(rankTimeline);
 
-                const combinedTimeline = combineLatestWith(
-                    (pos, rank) => ({ pos, rank })
-                )(positionTimeline)(rankTimeline);
-
-                this._currentTimelineCleanup = combinedTimeline.bind(({ pos, rank }) => {
-                    this._moveClockToPosition(pos, rank);
-                    return Timeline(null);
-                });
-            }
+            combinedTimeline.bind(({ pos, rank }) => {
+                this._moveClockToPosition(pos, rank);
+                return Timeline(null);
+            });
         }
 
         _findOriginalPosition() {
-            const dateMenu = this._originalDateMenu;
-            if (!dateMenu) return 'center';
-
-            // Check which panel section contains the dateMenu
-            if (Main.panel._leftBox.contains(dateMenu)) return 'left';
-            if (Main.panel._centerBox.contains(dateMenu)) return 'center';
-            if (Main.panel._rightBox.contains(dateMenu)) return 'right';
-
-            return 'center'; // Default fallback
+            if (!this._originalDateMenu) return 'center';
+            if (Main.panel._leftBox.contains(this._originalDateMenu)) return 'left';
+            if (Main.panel._centerBox.contains(this._originalDateMenu)) return 'center';
+            if (Main.panel._rightBox.contains(this._originalDateMenu)) return 'right';
+            return 'center';
         }
 
         _findOriginalRank() {
-            const dateMenu = this._originalDateMenu;
-            if (!dateMenu) return 0;
-
-            // Try to find the current index in the parent container
-            const parent = dateMenu.get_parent();
-            if (parent) {
-                const children = parent.get_children();
-                return children.indexOf(dateMenu);
-            }
-
-            return 0; // Default fallback
+            const parent = this._originalDateMenu?.get_parent();
+            return parent ? parent.get_children().indexOf(this._originalDateMenu) : 0;
         }
 
         _moveClockToPosition(position, rank) {
-            const dateMenu = this._originalDateMenu;
-            if (!dateMenu) return;
+            if (!this._originalDateMenu) return;
 
-            // Remove from current position
-            const currentParent = dateMenu.get_parent();
+            const currentParent = this._originalDateMenu.get_parent();
             if (currentParent) {
-                currentParent.remove_child(dateMenu);
+                currentParent.remove_child(this._originalDateMenu);
             }
 
-            // Get target container
             let targetContainer;
             switch (position) {
-                case 'left':
-                    targetContainer = Main.panel._leftBox;
-                    break;
-                case 'right':
-                    targetContainer = Main.panel._rightBox;
-                    break;
-                case 'center':
-                default:
-                    targetContainer = Main.panel._centerBox;
-                    break;
+                case 'left': targetContainer = Main.panel._leftBox; break;
+                case 'right': targetContainer = Main.panel._rightBox; break;
+                default: targetContainer = Main.panel._centerBox; break;
             }
 
-            // Add to new position with specified rank
             const children = targetContainer.get_children();
             const targetIndex = Math.max(0, Math.min(rank, children.length));
-
-            if (targetIndex >= children.length) {
-                targetContainer.add_child(dateMenu);
-            } else {
-                targetContainer.insert_child_at_index(dateMenu, targetIndex);
-            }
-        }
-
-        _cleanup() {
-            if (this._currentTimelineCleanup) {
-                this._currentTimelineCleanup();
-                this._currentTimelineCleanup = null;
-            }
-        }
-
-        restore() {
-            if (!this._isManaged || !this._originalDateMenu) return;
-
-            this._cleanup();
-
-            // Restore to original position
-            if (this._originalPosition !== null && this._originalRank !== null) {
-                this._moveClockToPosition(this._originalPosition, this._originalRank);
-            }
-
-            this._isManaged = false;
-            this._originalDateMenu = null;
-            this._originalPosition = null;
-            this._originalRank = null;
+            targetContainer.insert_child_at_index(this._originalDateMenu, targetIndex);
         }
 
         destroy() {
-            this.restore();
+
+            // Restore the clock to its original place
+            //Will crush Gnome, so do notihng
         }
     }
 );
