@@ -244,7 +244,69 @@ const AppMenuButton = GObject.registerClass(
             }
             return Clutter.EVENT_PROPAGATE;
         }
-        _launchNewInstance(app) { if (this._isDestroyed) return; app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT); }
+
+        /**
+         * アプリの起動プロセスを開始します。
+         * Promiseのthen/catchを使用して、成功・失敗をハンドリングします。
+         * @param {object} app - 起動するアプリケーションオブジェクト。
+         */
+        _launchNewInstance(app) {
+            // インスタンスが破棄されている場合は、処理を中断します。
+            if (this._isDestroyed) {
+                console.warn("Attempted to launch on a destroyed instance.");
+                return;
+            }
+
+            // Promiseを返す関数を呼び出し、その結果をチェーンで処理します。
+            this._promiseTryLaunchNew(app)
+                .then(() => {
+                    // Promiseがresolveされた場合（成功時）の処理
+                    console.log(`Launch sequence successfully initiated for app: ${app.get_id()}`);
+                })
+                .catch((error) => {
+                    // Promiseがrejectされた場合（失敗時）の処理
+                    console.error(`Error during the launch process for app: ${app.get_id()}`, error);
+                });
+        }
+
+        /**
+         * 実際の起動処理をPromiseでラップします。
+         * Promiseコンストラクタは内部で発生した例外を自動的に捕捉し、Promiseをrejectするため、
+         * 明示的なtry...catchは不要です。
+         * @param {object} app - 起動するアプリケーションオブジェクト。
+         * @returns {Promise<void>} 起動処理の成功時にresolveし、失敗時にrejectするPromiseを返します。
+         */
+        _promiseTryLaunchNew(app) {
+            return new Promise((resolve, reject) => {
+                // _tryLaunchNewで同期的な例外がスローされると、このPromiseは自動的にrejectされます。
+                this._tryLaunchNew(app);
+                // 例外がなければ、Promiseはresolveされます。
+                resolve();
+            });
+        }
+
+        /**
+         * アプリケーションを起動するコアな処理です。
+         * 失敗した場合は、呼び出し元に例外をスローして通知します。
+         * 今後、複数のtry-catchブロックをここに追加していくことができます。
+         * @param {object} app - 起動するアプリケーションオブジェクト。
+         */
+        _tryLaunchNew(app) {
+            // ここに5つほどの連続したTry-Catchブロックを実装する予定の場所です。
+            try {
+                // 元の起動コマンドです。
+                app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
+
+            } catch (error) {
+                // エラーが発生した場合、それをログに出力します。
+                // その後、エラーを再スローすることで、呼び出し元（_promiseTryLaunchNew）に伝播させます。
+                console.error('An error occurred during the launch attempt and is being re-thrown.', error);
+                throw error;
+            }
+        }
+
+
+
         _updateFavoriteSelection(newIndex) {
             const oldIndex = this._lastSelectedIndex;
             if (oldIndex !== null && this._favoriteButtons[oldIndex]) this._favoriteButtons[oldIndex].remove_style_class_name('selected');
