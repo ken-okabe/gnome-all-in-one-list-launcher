@@ -1,4 +1,4 @@
-// prefs.js
+// prefs.js (最終版)
 
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
@@ -13,164 +13,172 @@ import {
 
 const MAX_FAVORITES = 30;
 
-const KeybindingDialog = GObject.registerClass(class KeybindingDialog extends Gtk.Dialog {
-    _init(params) {
-        super._init({
-            ...params,
-            title: _('Set Shortcut'),
-            use_header_bar: 1,
-            modal: true,
-            resizable: false
-        });
-        this.set_size_request(400, 200);
+// ★★★ KeybindingDialogクラス全体を修正（クリア機能追加＆制限強化） ★★★
+const KeybindingDialog = GObject.registerClass(
+    class KeybindingDialog extends Gtk.Dialog {
+        _init(params) {
+            super._init({
+                ...params,
+                title: _('Set Shortcut'),
+                use_header_bar: 1,
+                modal: true,
+                resizable: false,
+            });
+            this.set_size_request(450, 250);
 
-        const cancelButton = this.add_button(_('Cancel'), Gtk.ResponseType.CANCEL);
-        cancelButton.set_focusable(false);
+            this._currentAccelerator = '';
 
-        this.setButton = this.add_button(_('Set'), Gtk.ResponseType.OK);
-        this.setButton.set_focusable(false);
-        this.setButton.set_sensitive(false);
-        this.setButton.add_css_class('suggested-action');
+            const contentBox = new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL,
+                spacing: 12,
+                margin_start: 24, margin_end: 24,
+                margin_top: 24, margin_bottom: 24,
+            });
+            this.get_content_area().append(contentBox);
 
-        const contentBox = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            margin_start: 24, margin_end: 24,
-            margin_top: 24, margin_bottom: 24
-        });
-        this.get_content_area().append(contentBox);
+            this.descriptionLabel = new Gtk.Label({
+                label: _('Press any key combination, or press Backspace to clear.'),
+                wrap: true, wrap_mode: Gtk.WrapMode.WORD, xalign: 0,
+            });
+            contentBox.append(this.descriptionLabel);
 
-        this.descriptionLabel = new Gtk.Label({
-            label: _('Press any key combination.'),
-            wrap: true, wrap_mode: Gtk.WrapMode.WORD, xalign: 0, vexpand: true
-        });
-        contentBox.append(this.descriptionLabel);
+            this.shortcutDisplayBox = new Gtk.Box({
+                orientation: Gtk.Orientation.HORIZONTAL,
+                spacing: 6,
+                halign: Gtk.Align.CENTER,
+                valign: Gtk.Align.CENTER,
+                css_classes: ['key-display-box'],
+                hexpand: true, vexpand: true,
+            });
+            contentBox.append(this.shortcutDisplayBox);
 
-        this.shortcutDisplayBox = new Gtk.Box({
-            orientation: Gtk.Orientation.HORIZONTAL,
-            spacing: 6,
-            halign: Gtk.Align.CENTER,
-            css_classes: ['key-display-box']
-        });
-        contentBox.append(this.shortcutDisplayBox);
+            this.keyIllustrationLabel = new Gtk.Label({
+                label: _('Press keys to set shortcut'),
+                css_classes: ['dim-label'],
+            });
+            this.shortcutDisplayBox.append(this.keyIllustrationLabel);
 
-        this.keyIllustrationLabel = new Gtk.Label({
-            label: _('Press keys to set shortcut'),
-            css_classes: ['dim-label']
-        });
-        this.shortcutDisplayBox.append(this.keyIllustrationLabel);
+            const clearButton = new Gtk.Button({
+                icon_name: 'edit-clear-symbolic',
+                valign: Gtk.Align.CENTER,
+                css_classes: ['flat'],
+                tooltip_text: _('Clear Shortcut'),
+            });
+            clearButton.connect('clicked', () => this._clearShortcut());
+            const header = this.get_header_bar();
+            header.pack_start(clearButton);
 
-        this.clearButton = new Gtk.Button({
-            icon_name: 'edit-clear-symbolic',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
-            visible: false,
-            focusable: false
-        });
-        this.clearButton.connect('clicked', () => this._clearShortcut());
-        this.shortcutDisplayBox.append(this.clearButton);
+            this.cancelButton = this.add_button(_('Cancel'), Gtk.ResponseType.CANCEL);
+            this.setButton = this.add_button(_('Set'), Gtk.ResponseType.OK);
+            this.setButton.set_sensitive(false);
+            this.setButton.get_style_context().add_class('suggested-action');
 
-        this.keyController = new Gtk.EventControllerKey;
-        this.add_controller(this.keyController);
+            this.keyController = new Gtk.EventControllerKey();
+            this.add_controller(this.keyController);
+            this.keyController.connect('key-pressed', this._onKeyPressed.bind(this));
+        }
 
-        this.keyController.connect('key-pressed', (controller, keyval, keycode, state) => {
-            switch (keyval) {
-                case Gdk.KEY_Return:
-                case Gdk.KEY_KP_Enter:
-                    if (this.setButton.is_sensitive()) {
-                        this.response(Gtk.ResponseType.OK);
-                    }
-                    return Gdk.EVENT_STOP;
-                case Gdk.KEY_space:
-                    return Gdk.EVENT_STOP;
-                case Gdk.KEY_BackSpace:
-                    this._clearShortcut();
-                    return Gdk.EVENT_STOP;
+        _onKeyPressed(controller, keyval, keycode, state) {
+            if (keyval === Gdk.KEY_BackSpace) {
+                this._clearShortcut();
+                return Gdk.EVENT_STOP;
+            }
+
+            if (this._isModifier(keyval)) {
+                return Gdk.EVENT_STOP;
             }
 
             const mask = state & Gtk.accelerator_get_default_mod_mask();
 
-            if (this._isBindingValid({ mask, keycode, keyval })) {
-                const binding = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
-                this._setShortcutDisplay(binding);
-                this.emittedShortcut = binding;
-                this.setButton.set_sensitive(true);
+            let isRestrictedAlone = false;
+            if (mask === 0) {
+                switch (true) {
+                    case (keyval >= Gdk.KEY_a && keyval <= Gdk.KEY_z):
+                    case (keyval >= Gdk.KEY_A && keyval <= Gdk.KEY_Z):
+                    case (keyval >= Gdk.KEY_0 && keyval <= Gdk.KEY_9):
+                    case (keyval === Gdk.KEY_space):
+                    case (keyval === Gdk.KEY_Return || keyval === Gdk.KEY_KP_Enter):
+                    case (keyval === Gdk.KEY_Escape):
+                    case (keyval === Gdk.KEY_Tab || keyval === Gdk.KEY_ISO_Left_Tab):
+                    case (keyval === Gdk.KEY_Up):
+                    case (keyval === Gdk.KEY_Down):
+                    case (keyval === Gdk.KEY_Left):
+                    case (keyval === Gdk.KEY_Right):
+                    case (keyval === Gdk.KEY_Insert):
+                    case (keyval === Gdk.KEY_Delete):
+                        isRestrictedAlone = true;
+                        break;
+                }
             }
+
+            const isCtrlSpace = (keyval === Gdk.KEY_space && mask === Gdk.ModifierType.CONTROL_MASK);
+
+            if ((Gtk.accelerator_valid(keyval, mask) || isCtrlSpace) && !isRestrictedAlone) {
+                const binding = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
+                this._setShortcut(binding);
+                this.setButton.set_sensitive(true);
+            } else {
+                this._setShortcut('');
+                this.setButton.set_sensitive(false);
+            }
+
             return Gdk.EVENT_STOP;
-        });
+        }
 
-        this.emittedShortcut = null;
-    }
-
-    _clearShortcut() {
-        this._setShortcutDisplay('');
-        this.emittedShortcut = '';
-        this.setButton.set_sensitive(true);
-    }
-
-    setTargetName(name) { this.descriptionLabel.set_label(`${_('Enter new shortcut to change')} ${name}`); }
-
-    setCurrentShortcut(shortcut) {
-        this._setShortcutDisplay(shortcut);
-        if (shortcut) {
-            this.setButton.set_sensitive(true);
-            this.emittedShortcut = shortcut;
-        } else {
+        _clearShortcut() {
+            this._setShortcut('');
             this.setButton.set_sensitive(false);
-            this.emittedShortcut = null;
-        }
-    }
-
-    _setShortcutDisplay(shortcutString) {
-        while (this.shortcutDisplayBox.get_first_child() !== this.clearButton) {
-            this.shortcutDisplayBox.remove(this.shortcutDisplayBox.get_first_child());
         }
 
-        if (shortcutString) {
+        _isModifier(keyval) {
+            return keyval === Gdk.KEY_Control_L || keyval === Gdk.KEY_Control_R ||
+                keyval === Gdk.KEY_Shift_L || keyval === Gdk.KEY_Shift_R ||
+                keyval === Gdk.KEY_Alt_L || keyval === Gdk.KEY_Alt_R ||
+                keyval === Gdk.KEY_Super_L || keyval === Gdk.KEY_Super_R;
+        }
+
+        _setShortcut(accelerator) {
+            this._currentAccelerator = accelerator;
+
             if (this.keyIllustrationLabel.get_parent()) {
                 this.shortcutDisplayBox.remove(this.keyIllustrationLabel);
             }
-            const displayText = shortcutString.replace(/</g, '').replace(/>/g, ' + ').replace(/\s+\+\s*$/, '');
-            const label = new Gtk.Label({ label: displayText, css_classes: ['key-label'] });
-            this.shortcutDisplayBox.insert_child_after(label, null);
-            this.clearButton.set_visible(true);
-        } else {
             let child;
-            while ((child = this.shortcutDisplayBox.get_first_child()) && child !== this.clearButton) {
+            while ((child = this.shortcutDisplayBox.get_first_child())) {
                 this.shortcutDisplayBox.remove(child);
             }
-            this.shortcutDisplayBox.insert_child_after(this.keyIllustrationLabel, null);
-            this.clearButton.set_visible(false);
-        }
-    }
-
-    _isBindingValid({ mask, keycode, keyval }) {
-        if ((mask === 0 || mask === Gdk.ModifierType.SHIFT_MASK) && keycode !== 0) {
-            if (
-                (keyval >= Gdk.KEY_a && keyval <= Gdk.KEY_z)
-                || (keyval >= Gdk.KEY_A && keyval <= Gdk.KEY_Z)
-                || (keyval >= Gdk.KEY_0 && keyval <= Gdk.KEY_9)
-                || (keyval >= Gdk.KEY_kana_fullstop && keyval <= Gdk.KEY_semivoicedsound)
-                || (keyval >= Gdk.KEY_Arabic_comma && keyval <= Gdk.KEY_Arabic_sukun)
-                || (keyval >= Gdk.KEY_Serbian_dje && keyval <= Gdk.KEY_Cyrillic_HARDSIGN)
-                || (keyval >= Gdk.KEY_Greek_ALPHAaccent && keyval <= Gdk.KEY_Greek_omega)
-                || (keyval >= Gdk.KEY_hebrew_doublelowline && keyval <= Gdk.KEY_hebrew_taf)
-                || (keyval >= Gdk.KEY_Thai_kokai && keyval <= Gdk.KEY_Thai_lekkao)
-                || (keyval >= Gdk.KEY_Hangul_Kiyeog && keyval <= Gdk.KEY_Hangul_J_YeorinHieuh)
-                || (keyval === Gdk.KEY_space && mask === 0)
-            ) {
-                return false;
+            if (accelerator) {
+                const prettyString = accelerator
+                    .replace(/</g, '')
+                    .replace(/>/g, ' + ')
+                    .replace(/_L$|_R$/, '')
+                    .replace(/\s\+\s*$/, '');
+                const label = new Gtk.Label({ label: prettyString, css_classes: ['key-label'] });
+                this.shortcutDisplayBox.append(label);
+            } else {
+                this.shortcutDisplayBox.append(this.keyIllustrationLabel);
             }
         }
 
-        return Gtk.accelerator_valid(keyval, mask)
-            || (keyval === Gdk.KEY_Tab && mask !== 0)
-            || (keyval === Gdk.KEY_Scroll_Lock)
-            || (keyval === Gdk.KEY_Break);
-    }
+        setTargetName(name) {
+            if (name) {
+                this.set_title(_('Set Shortcut for “%s”').format(name));
+            }
+        }
 
-    get_shortcut() { return this.emittedShortcut; }
-});
+        setCurrentShortcut(accelerator) {
+            if (accelerator) {
+                this._setShortcut(accelerator);
+                this.setButton.set_sensitive(true);
+            }
+        }
+
+        get_shortcut() {
+            return this._currentAccelerator;
+        }
+    }
+);
+
 
 export default class AllWindowsPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
@@ -198,16 +206,6 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     _buildFavoritesPage() {
         const page = new Adw.PreferencesPage({ title: _('Favorites'), icon_name: 'starred-symbolic' });
 
-        const priorityGroup = new Adw.PreferencesGroup({ title: _('Shortcut Priority') });
-        page.add(priorityGroup);
-
-        const prioritySwitch = new Adw.SwitchRow({
-            title: _('Prioritize Shortcuts'),
-            subtitle: _('Unlike other settings which apply instantly, a reload of the extension is required for this change to take effect. Caution: Use with care as it may interfere with basic system operations.')
-        });
-        this._settings.bind('prioritize-shortcuts', prioritySwitch, 'active', Gio.SettingsBindFlags.DEFAULT);
-        priorityGroup.add(prioritySwitch);
-
         const mainShortcutGroup = new Adw.PreferencesGroup({ title: _('Main Action Shortcut') });
         page.add(mainShortcutGroup);
         this._createShortcutRow(mainShortcutGroup, _('Open Popup Menu'), 'open-popup-shortcut');
@@ -228,7 +226,6 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
             subtitle: _('View which keys can be used for shortcuts')
         });
         availableKeysGroup.add(expanderRow);
-
         this._addAvailableKeysContent(expanderRow);
 
         const scrolledWindow = new Gtk.ScrolledWindow({ vexpand: true, min_content_height: 400, hscrollbar_policy: Gtk.PolicyType.NEVER, vscrollbar_policy: Gtk.PolicyType.AUTOMATIC });
@@ -271,68 +268,53 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _addAvailableKeysContent(expanderRow) {
-        const allowedBox = new Gtk.Box({
+        const boxStyle = {
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 8,
             margin_start: 12,
             margin_end: 12,
             margin_top: 8,
             margin_bottom: 8
-        });
+        };
 
-        const allowedLabel = new Gtk.Label({
-            label: '<b>✅ Available Keys (can be used alone):</b>',
+        const allowedBox = new Gtk.Box(boxStyle);
+        allowedBox.append(new Gtk.Label({
+            label: `<b>✅ ${_('Available Keys (can be used alone):')}</b>`,
             use_markup: true,
             xalign: 0,
             css_classes: ['heading']
-        });
-        allowedBox.append(allowedLabel);
-
-        const allowedKeysText = new Gtk.Label({
-            label: '• Function Keys: F1, F2, F3, ... F12, F13-F35\n' +
-                '• Navigation: Home, End, Page Up, Page Down\n' +
-                '• System Keys: Print Screen, Scroll Lock, Pause, Menu\n' +
-                '• Any key combination with modifiers (Ctrl, Alt, Super, Shift)',
+        }));
+        allowedBox.append(new Gtk.Label({
+            label: `• ${_('Function Keys: F1, F2, F3, ... F12, F13-F35')}\n` +
+                `• ${_('Navigation: Home, End, Page Up, Page Down')}\n` +
+                `• ${_('System Keys: Print Screen, Scroll Lock, Pause, Menu')}\n` +
+                `• ${_('Any key combination with modifiers (Ctrl, Alt, Super, Shift)')}`,
             xalign: 0,
             css_classes: ['body'],
             margin_start: 16
-        });
-        allowedBox.append(allowedKeysText);
+        }));
+        expanderRow.add_row(new Adw.ActionRow({ child: allowedBox, activatable: false }));
 
-        expanderRow.add_row(new Adw.ActionRow({ child: allowedBox }));
-
-        const restrictedBox = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 8,
-            margin_start: 12,
-            margin_end: 12,
-            margin_top: 8,
-            margin_bottom: 8
-        });
-
-        const restrictedLabel = new Gtk.Label({
-            label: '<b>❌ Restricted Keys (require modifier keys):</b>',
+        const restrictedBox = new Gtk.Box(boxStyle);
+        restrictedBox.append(new Gtk.Label({
+            label: `<b>❌ ${_('Restricted Keys (require modifier keys):')}</b>`,
             use_markup: true,
             xalign: 0,
             css_classes: ['heading']
-        });
-        restrictedBox.append(restrictedLabel);
-
-        const restrictedKeysText = new Gtk.Label({
-            label: '• Letters: a-z, A-Z (to avoid conflicts with text input)\n' +
-                '• Numbers: 0-9 (to avoid conflicts with text input)\n' +
-                '• Basic UI Keys: Space, Enter, Escape, Tab\n' +
-                '• Arrow Keys: Up, Down, Left, Right\n' +
-                '• Edit Keys: Insert, Delete, Backspace\n\n' +
-                '<i>These keys can be used with Ctrl, Alt, Super, or Shift modifiers.</i>',
+        }));
+        restrictedBox.append(new Gtk.Label({
+            label: `• ${_('Letters: a-z, A-Z (to avoid conflicts with text input)')}\n` +
+                `• ${_('Numbers: 0-9 (to avoid conflicts with text input)')}\n` +
+                `• ${_('Basic UI Keys: Space, Enter, Escape, Tab')}\n` +
+                `• ${_('Arrow Keys: Up, Down, Left, Right')}\n` +
+                `• ${_('Edit Keys: Insert, Delete, Backspace')}\n\n` +
+                `<i>${_('These keys can be used with Ctrl, Alt, Super, or Shift modifiers.')}</i>`,
             use_markup: true,
             xalign: 0,
             css_classes: ['body'],
             margin_start: 16
-        });
-        restrictedBox.append(restrictedKeysText);
-
-        expanderRow.add_row(new Adw.ActionRow({ child: restrictedBox }));
+        }));
+        expanderRow.add_row(new Adw.ActionRow({ child: restrictedBox, activatable: false }));
     }
 
     _moveFavoriteItem(oldIndex, newIndex) {

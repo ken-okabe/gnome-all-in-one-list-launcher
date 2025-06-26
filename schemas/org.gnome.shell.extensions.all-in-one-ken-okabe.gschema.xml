@@ -9,8 +9,6 @@
     <key name="show-window-icon-list" type="b"><default>true</default></key>
     <key name="hide-overview-at-startup" type="b"><default>true</default></key>
 
-    <key name="prioritize-shortcuts" type="b"><default>false</default></key>
-
     <key name="shortcut-0" type="as"><default>[]</default></key>
     <key name="shortcut-1" type="as"><default>[]</default></key>
     <key name="shortcut-2" type="as"><default>[]</default></key>
