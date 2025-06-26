@@ -1,3 +1,5 @@
+// extension.js
+
 import St from 'gi://St';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
@@ -12,7 +14,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Timeline, Now, combineLatestWith } from './timeline.js';
 
-// --- NonClosingPopupBaseMenuItem Class  ---
+// --- NonClosingPopupBaseMenuItem Class (変更なし) ---
 const NonClosingPopupBaseMenuItem = GObject.registerClass({
     Signals: {
         'custom-activate': {},
@@ -85,28 +87,19 @@ const WindowModel = GObject.registerClass(
         }
     });
 
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// ★ UIコンポーネントクラス RunningAppsIndicator (合意仕様版) ★
-// ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-// アイコンを並べるためのレイアウト用クラス
+// --- RunningAppsIndicator & IconList Classes (変更なし) ---
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
         _init() {
             super._init();
             this._icons = [];
         }
-
         update(windowGroups) {
             this.destroy_all_children();
             this._icons = [];
-
             if (!windowGroups) return;
-
             for (const group of windowGroups) {
-                const icon = new St.Icon({
-                    gicon: group.app.get_icon(),
-                    style_class: 'system-status-icon'
-                });
+                const icon = new St.Icon({ gicon: group.app.get_icon(), style_class: 'system-status-icon' });
                 const button = new St.Button({ child: icon });
                 button.connect('clicked', () => {
                     if (group.windows.length > 0) Main.activateWindow(group.windows[0]);
@@ -118,21 +111,17 @@ const RunningAppsIconList = GObject.registerClass(
     }
 );
 
-// パネルに追加するための、上記クラスを内包するボタンクラス
 const RunningAppsIndicator = GObject.registerClass(
     class RunningAppsIndicator extends PanelMenu.Button {
         _init({ windowsTimeline }) {
             super._init(0.0, null, false);
             this.reactive = false;
-
             this._iconList = new RunningAppsIconList();
             this.add_child(this._iconList);
-
             windowsTimeline.map(windowGroups => {
                 this._iconList?.update(windowGroups);
             });
         }
-
         destroy() {
             this._iconList?.destroy();
             this._iconList = null;
@@ -372,57 +361,116 @@ const AppMenuButton = GObject.registerClass(
     }
 );
 
-// ★★★★★ メインの拡張機能クラス (Timeline.bindによるライフサイクル管理とIndicatorの追加) ★★★★★
+// ★ メインクラス (クリーンな状態へのリセット版)
 export default class MinimalTimelineExtension extends Extension {
     constructor(metadata) {
         super(metadata);
+        this._lifecycleTimeline = null;
         this._appMenuButton = null;
-        this._runningAppsIndicator = null; // ★ Indicatorのプロパティを追加
+        this._runningAppsIndicator = null;
         this._windowModel = null;
         this._favsSettings = null;
-        this._lifecycleTimeline = null;
-        this._favsConnectionId = null;
+        this._gsettingsConnections = [];
     }
 
-    _createSettingTimeline(settings, key) {
-        const t = Timeline(settings.get_strv(key));
-        const id = settings.connect(`changed::${key}`, () => t.define(Now, settings.get_strv(key)));
-        return { timeline: t, GSettingConnectionId: id };
+    _onOpenPopupShortcut() {
+        this._appMenuButton?.menu.toggle();
+    }
+
+    _onFavoriteShortcut(index) {
+        const favs = this._favsSettings.get_strv('favorite-apps');
+        const appId = favs[index];
+        if (appId) {
+            const app = Shell.AppSystem.get_default().lookup_app(appId);
+            if (app) {
+                const windows = app.get_windows();
+                if (windows.length > 0) {
+                    Main.activateWindow(windows[0]);
+                } else {
+                    app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
+                }
+            }
+        }
     }
 
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
-        const favsInfo = this._createSettingTimeline(this._favsSettings, 'favorite-apps');
-        this._favsConnectionId = favsInfo.GSettingConnectionId;
+        const settings = this.getSettings();
 
-        // Timeline.bind を使ってリソースの生成と破棄を管理
+        if (settings.get_boolean('hide-overview-at-startup')) {
+            Main.overview.hide();
+        }
+
         this._lifecycleTimeline.bind(isEnabled => {
             if (isEnabled) {
-                // isEnabledがtrueの時にリソースを生成
+                // キーバインド登録
+                Main.wm.addKeybinding(
+                    'open-popup-shortcut', settings, Meta.KeyBindingFlags.NONE,
+                    Shell.ActionMode.NORMAL, this._onOpenPopupShortcut.bind(this)
+                );
+                for (let i = 0; i < 30; i++) {
+                    Main.wm.addKeybinding(
+                        `shortcut-${i}`, settings, Meta.KeyBindingFlags.NONE,
+                        Shell.ActionMode.NORMAL, this._onFavoriteShortcut.bind(this, i)
+                    );
+                }
+
+                // UI要素の生成と管理
                 this._windowModel = new WindowModel();
 
-                // AppMenuButtonを生成
-                this._appMenuButton = new AppMenuButton({
-                    windowsTimeline: this._windowModel.windowsTimeline,
-                    favoritesTimeline: favsInfo.timeline,
-                    extension: this,
-                    settings: this.getSettings(),
-                });
-                Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this._appMenuButton, 0, 'left');
+                const mainIconPosTimeline = this._createStringSettingTimeline(settings, 'main-icon-position');
+                const mainIconRankTimeline = this._createIntSettingTimeline(settings, 'main-icon-rank');
+                const showIconListTimeline = this._createBooleanSettingTimeline(settings, 'show-window-icon-list');
 
-                // ★ RunningAppsIndicatorを生成
-                this._runningAppsIndicator = new RunningAppsIndicator({
-                    windowsTimeline: this._windowModel.windowsTimeline,
+                const posAndRankTimeline = combineLatestWith(
+                    (pos, rank) => ({ pos, rank })
+                )(mainIconPosTimeline)(mainIconRankTimeline);
+
+                const mainIconConfigTimeline = combineLatestWith(
+                    (posAndRank, show) => ({ ...posAndRank, show })
+                )(posAndRankTimeline)(showIconListTimeline);
+
+                mainIconConfigTimeline.bind(({ pos, rank, show }) => {
+                    this._appMenuButton?.destroy();
+                    this._runningAppsIndicator?.destroy();
+
+                    const favoritesTimeline = this._createStrvSettingTimeline(this._favsSettings, 'favorite-apps');
+
+                    this._appMenuButton = new AppMenuButton({
+                        windowsTimeline: this._windowModel.windowsTimeline,
+                        favoritesTimeline: favoritesTimeline,
+                        extension: this,
+                        settings: settings,
+                    });
+                    Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this._appMenuButton, rank, pos);
+
+                    this._runningAppsIndicator = new RunningAppsIndicator({
+                        windowsTimeline: this._windowModel.windowsTimeline,
+                    });
+                    this._runningAppsIndicator.visible = show;
+                    Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, rank + 1, pos);
+
+                    showIconListTimeline.map(isVisible => {
+                        if (this._runningAppsIndicator) {
+                            this._runningAppsIndicator.visible = isVisible;
+                        }
+                    });
+
+                    return Timeline(null);
                 });
-                Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, 1, 'left');
 
             } else {
-                // isEnabledがfalseになったらUIとモデルを全て破棄
-                // このブロックが、bindによって自動的に呼び出される
+                // キーバインド解除
+                Main.wm.removeKeybinding('open-popup-shortcut');
+                for (let i = 0; i < 30; i++) {
+                    Main.wm.removeKeybinding(`shortcut-${i}`);
+                }
+
+                // UI要素の破棄
                 this._appMenuButton?.destroy();
                 this._appMenuButton = null;
-                this._runningAppsIndicator?.destroy(); // ★ Indicatorも破棄
+                this._runningAppsIndicator?.destroy();
                 this._runningAppsIndicator = null;
                 this._windowModel?.destroy();
                 this._windowModel = null;
@@ -434,11 +482,39 @@ export default class MinimalTimelineExtension extends Extension {
     disable() {
         this._lifecycleTimeline?.define(Now, false);
         this._lifecycleTimeline = null;
-        if (this._favsSettings && this._favsConnectionId) {
-            this._favsSettings.disconnect(this._favsConnectionId);
-            this._favsConnectionId = null;
-        }
+
+        this._gsettingsConnections.forEach(({ source, id }) => {
+            if (source && id) {
+                try { source.disconnect(id); } catch (e) { }
+            }
+        });
+        this._gsettingsConnections = [];
         this._favsSettings = null;
+    }
+
+    _createGenericSettingTimeline(settings, key, getter) {
+        const timeline = Timeline(getter(key));
+        const connectionId = settings.connect(`changed::${key}`, () => {
+            timeline.define(Now, getter(key));
+        });
+        this._gsettingsConnections.push({ source: settings, id: connectionId });
+        return timeline;
+    }
+
+    _createStrvSettingTimeline(settings, key) {
+        return this._createGenericSettingTimeline(settings, key, settings.get_strv.bind(settings));
+    }
+
+    _createBooleanSettingTimeline(settings, key) {
+        return this._createGenericSettingTimeline(settings, key, settings.get_boolean.bind(settings));
+    }
+
+    _createStringSettingTimeline(settings, key) {
+        return this._createGenericSettingTimeline(settings, key, settings.get_string.bind(settings));
+    }
+
+    _createIntSettingTimeline(settings, key) {
+        return this._createGenericSettingTimeline(settings, key, settings.get_int.bind(settings));
     }
 
     _toggleFavorite(appId) {

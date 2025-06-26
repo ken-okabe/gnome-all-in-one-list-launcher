@@ -1,5 +1,3 @@
-// prefs.js
-
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
@@ -145,6 +143,7 @@ const KeybindingDialog = GObject.registerClass(class KeybindingDialog extends Gt
     }
 
     _isBindingValid({ mask, keycode, keyval }) {
+        // Use the simpler validation logic like in the Pasted code
         if ((mask === 0 || mask === Gdk.ModifierType.SHIFT_MASK) && keycode !== 0) {
             if (
                 (keyval >= Gdk.KEY_a && keyval <= Gdk.KEY_z)
@@ -220,6 +219,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         });
         page.add(favoritesGroup);
 
+        // Available Keys セクション
         const availableKeysGroup = new Adw.PreferencesGroup({ title: _('Available Keys') });
         page.add(availableKeysGroup);
 
@@ -271,6 +271,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _addAvailableKeysContent(expanderRow) {
+        // 使用可能なキーのセクション
         const allowedBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 8,
@@ -301,6 +302,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
 
         expanderRow.add_row(new Adw.ActionRow({ child: allowedBox }));
 
+        // 使用不可能なキーのセクション
         const restrictedBox = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 8,
@@ -423,16 +425,14 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const displayGroup = new Adw.PreferencesGroup({ title: _('Panel Item Positions') });
         page.add(displayGroup);
 
-        const positions = ['left', 'center', 'right'];
-
         const indicatorPosRow = new Adw.ComboRow({
             title: _('Main Icon Group Position'),
             subtitle: _('Position of the main icon and the window icon list'),
-            model: Gtk.StringList.new(positions),
+            model: Gtk.StringList.new(['left', 'center', 'right']),
+            selected: ['left', 'center', 'right'].indexOf(this._settings.get_string('main-icon-position'))
         });
-        indicatorPosRow.set_selected(positions.indexOf(this._settings.get_string('main-icon-position')));
         indicatorPosRow.connect('notify::selected', () => {
-            this._settings.set_string('main-icon-position', positions[indicatorPosRow.get_selected()]);
+            this._settings.set_string('main-icon-position', ['left', 'center', 'right'][indicatorPosRow.get_selected()]);
         });
         displayGroup.add(indicatorPosRow);
 
@@ -447,11 +447,11 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const dateMenuPosRow = new Adw.ComboRow({
             title: _('Date/Time Menu Position'),
             subtitle: _('Move the clock to the left, center, or right section of the panel'),
-            model: Gtk.StringList.new(positions),
+            model: Gtk.StringList.new(['left', 'center', 'right']),
+            selected: ['left', 'center', 'right'].indexOf(this._settings.get_string('date-menu-position'))
         });
-        dateMenuPosRow.set_selected(positions.indexOf(this._settings.get_string('date-menu-position')));
         dateMenuPosRow.connect('notify::selected', () => {
-            this._settings.set_string('date-menu-position', positions[dateMenuPosRow.get_selected()]);
+            this._settings.set_string('date-menu-position', ['left', 'center', 'right'][dateMenuPosRow.get_selected()]);
         });
         displayGroup.add(dateMenuPosRow);
 
