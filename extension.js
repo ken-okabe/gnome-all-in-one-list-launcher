@@ -214,7 +214,7 @@ const RunningAppsIndicator = GObject.registerClass(
 // --- AppMenuButton Class ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
-        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
+        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
             this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
@@ -233,6 +233,7 @@ const AppMenuButton = GObject.registerClass(
 
             this.toBeFocusedNewTimeline = toBeFocusedNewTimeline;
             this.toBeFocusedRemoveTimeline = toBeFocusedRemoveTimeline;
+            this.redrawTimeline = redrawTimeline;
             this._windowsTimeline = windowsTimeline;
             this._favoritesTimeline = favoritesTimeline;
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
@@ -257,7 +258,6 @@ const AppMenuButton = GObject.registerClass(
             windowSectionDataTimeline.map(({ windows, favs }) => {
                 if (this._isDestroyed) return;
                 this._updateWindowsSection(windows, favs);
-                this._applyFocusIntent();
             });
         }
 
@@ -269,66 +269,6 @@ const AppMenuButton = GObject.registerClass(
         close() {
             super.close();
             this._selectedFavoriteIndexTimeline.define(Now, null);
-        }
-
-        // 【修正後】の _applyFocusIntent メソッド
-
-        _applyFocusIntent() {
-            const appToFocus = this.toBeFocusedNewTimeline.at(Now);
-            const indexToFocus = this.toBeFocusedRemoveTimeline.at(Now);
-
-            console.log(`[FocusDebug] _applyFocusIntent: Called. appToFocus: ${appToFocus?.get_id() || 'null'}, indexToFocus: ${indexToFocus}`);
-
-            if (!appToFocus && indexToFocus === null) return;
-
-            // 意図を一度実行したらリセットする
-            this.toBeFocusedNewTimeline.define(Now, null);
-            this.toBeFocusedRemoveTimeline.define(Now, null);
-
-            // ★★★ BUG FIX: Defer focus change until the UI is idle.
-            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                if (this._isDestroyed) return GLib.SOURCE_REMOVE;
-
-                if (appToFocus) {
-                    const allWindowItems = this._windowsContainer.filter(item => item && item._itemType === 'window');
-                    let targetWindowItem = null;
-                    let latestTimestamp = -1;
-
-                    for (const item of allWindowItems) {
-                        const [win, timestamp] = item._itemData;
-                        const itemApp = this._extension._windowModel._windowTracker.get_window_app(win);
-                        if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
-                            console.log(`[FocusDebug] _applyFocusIntent (idle): Found matching window with timestamp: ${timestamp}`);
-                            if (timestamp > latestTimestamp) {
-                                latestTimestamp = timestamp;
-                                targetWindowItem = item;
-                            }
-                        }
-                    }
-                    if (targetWindowItem) {
-                        console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus target window item with latest timestamp: ${latestTimestamp}`);
-                        this.menu.active_item = targetWindowItem;
-                    } else {
-                        console.log(`[FocusDebug] _applyFocusIntent (idle): No target window found for app: ${appToFocus.get_id()}`);
-                    }
-
-                } else if (indexToFocus !== null && indexToFocus >= 0) {
-                    const focusableItems = Array.from(this.menu).filter(item => item && item.reactive);
-                    if (focusableItems.length > 0) {
-                        if (indexToFocus > 0) {
-                            const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
-                            console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus item at new index: ${newFocusIndex}`);
-                            this.menu.active_item = focusableItems[newFocusIndex];
-                        } else {
-                            console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus item at new index: 0`);
-                            this.menu.active_item = focusableItems[0];
-                        }
-                    } else {
-                        console.log(`[FocusDebug] _applyFocusIntent (idle): No focusable items found after closing.`);
-                    }
-                }
-                return GLib.SOURCE_REMOVE; // Run only once
-            });
         }
 
         _flashIcon(color) {
@@ -361,7 +301,7 @@ const AppMenuButton = GObject.registerClass(
                 if (appId) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (app) {
-                        console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`); // ★ この行を挿入
+                        console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`);
                         this.toBeFocusedNewTimeline.define(Now, app);
                         this.toBeFocusedRemoveTimeline.define(Now, null);
                         this._launchNewInstance(app);
@@ -575,6 +515,20 @@ const AppMenuButton = GObject.registerClass(
                 this.menu.addMenuItem(noWindowsItem);
                 this._windowsContainer.push(noWindowsItem);
             }
+
+            // ★★★ ここからが追加するコード ★★★
+            // UIの更新処理が完了し、次のアイドル状態（描画が完了したタイミングに近い）で
+            // redrawTimeline を発火させる。
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                // `this.redrawTimeline` が存在することを確認
+                if (this.redrawTimeline) {
+                    this.redrawTimeline.define(Now, true);
+                }
+                // 一度だけ実行するため SOURCE_REMOVE を返す
+                return GLib.SOURCE_REMOVE;
+            });
+            // ★★★ 追加コードここまで ★★★
+
         }
 
         _handleWindowActivate(actor, item, itemType) {
@@ -591,7 +545,7 @@ const AppMenuButton = GObject.registerClass(
             this.toBeFocusedNewTimeline.define(Now, null);
             const focusableItems = Array.from(this.menu).filter(i => i && i.reactive);
             const itemIndex = focusableItems.indexOf(actor);
-            console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`); // ★ この行を挿入
+            console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`);
             this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
 
             this._closeSelection(actor, item, itemType);
@@ -695,6 +649,11 @@ export default class MinimalTimelineExtension extends Extension {
         this._favsSettings = null;
         this._gsettingsConnections = [];
         this._dateTimeClockManager = null;
+
+        this._windowTimestamps = null;
+        this.toBeFocusedNewTimeline = null;
+        this.toBeFocusedRemoveTimeline = null;
+        this.redrawTimeline = null;
     }
 
     _onOpenPopupShortcut() {
@@ -717,6 +676,167 @@ export default class MinimalTimelineExtension extends Extension {
         }
     }
 
+    // インデックス指定でメニューアイテムに確実にフォーカスする関数
+    _focusMenuItemByIndex(targetIndex) {
+        // メニューボタンが存在し、かつメニューが開いていることを確認
+        if (!this._appMenuButton || !this._appMenuButton.menu.isOpen) {
+            return;
+        }
+
+        const menu = this._appMenuButton.menu;
+        const menuBox = menu.box;
+
+        if (!menuBox) {
+            return;
+        }
+
+        // フォーカス可能なアイテムを取得（動作実績のあるフィルタリング）
+        const children = menuBox.get_children();
+        const focusableItems = children.filter(child => {
+            const isVisible = child && child.visible && child.mapped;
+            const canInteract = child.reactive && child.can_focus;
+            const opacity = child.get_paint_opacity();
+            const isNotTransparent = opacity > 0;
+
+            return isVisible && canInteract && isNotTransparent;
+        });
+
+        // インデックスの範囲チェック
+        if (targetIndex < 0 || targetIndex >= focusableItems.length) {
+            return;
+        }
+
+        const targetItem = focusableItems[targetIndex];
+
+        try {
+            // 動作実績のある複数のフォーカス方法を実行
+            menu.active_item = targetItem;
+            targetItem.grab_key_focus();
+
+            // メニューのナビゲーション機能も使用
+            if (menu.navigate_item) {
+                menu.navigate_item(targetItem);
+            }
+
+            // 確実にフォーカスするため遅延チェックと追加設定
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+                const hasKeyFocus = targetItem.has_key_focus();
+                const isActive = menu.active_item === targetItem;
+
+                if (!hasKeyFocus && !isActive) {
+                    // 追加の方法を試行
+                    const stage = targetItem.get_stage();
+                    if (stage) {
+                        stage.set_key_focus(targetItem);
+                    }
+                }
+
+                return GLib.SOURCE_REMOVE;
+            });
+
+        } catch (error) {
+            // エラーが発生しても静かに処理を継続
+        }
+    }
+    // 使用例：
+    // this._focusMenuItemByIndex(0, true); // インデックス0にフォーカスし、監視を開始
+    // this._focusMenuItemByIndex(2, false); // インデックス2にフォーカスするが監視はしない
+    // this.stopFocusMonitoring(); // 手動で監視を停止
+
+    // targetWindowItemのインデックスを取得する関数
+    _getMenuItemIndex(targetWindowItem) {
+        // メニューボタンが存在し、かつメニューが開いていることを確認
+        if (!this._appMenuButton || !this._appMenuButton.menu.isOpen || !targetWindowItem) {
+            return -1;
+        }
+
+        const menu = this._appMenuButton.menu;
+        const menuBox = menu.box;
+
+        if (!menuBox) {
+            return -1;
+        }
+
+        // フォーカス可能なアイテムを取得（_focusMenuItemByIndexと同じフィルタリング条件）
+        const children = menuBox.get_children();
+        const focusableItems = children.filter(child => {
+            const isVisible = child && child.visible && child.mapped;
+            const canInteract = child.reactive && child.can_focus;
+            const opacity = child.get_paint_opacity();
+            const isNotTransparent = opacity > 0;
+
+            return isVisible && canInteract && isNotTransparent;
+        });
+
+        // targetWindowItemのインデックスを検索
+        const targetIndex = focusableItems.findIndex(item => item === targetWindowItem);
+
+        return targetIndex; // 見つからない場合は-1が返される
+    }
+
+    _applyFocusIntent() {
+        const appToFocus = this.toBeFocusedNewTimeline.at(Now);
+        const indexToFocus = this.toBeFocusedRemoveTimeline.at(Now);
+
+        console.log(`[FocusDebug] _applyFocusIntent: Called. appToFocus: ${appToFocus?.get_id() || 'null'}, indexToFocus: ${indexToFocus}`);
+
+        if (!appToFocus && indexToFocus === null) return;
+
+        this.toBeFocusedNewTimeline.define(Now, null);
+        this.toBeFocusedRemoveTimeline.define(Now, null);
+
+        const focus = () => {
+
+            if (appToFocus) {
+                const allWindowItems = this._appMenuButton._windowsContainer.filter(item => item && item._itemType === 'window');
+                let targetWindowItem = null;
+                let latestTimestamp = -1;
+
+                for (const item of allWindowItems) {
+                    const [win, timestamp] = item._itemData;
+                    const itemApp = this._windowModel._windowTracker.get_window_app(win);
+                    if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
+                        console.log(`[FocusDebug] _applyFocusIntent: Found matching window with timestamp: ${timestamp}`);
+                        if (timestamp > latestTimestamp) {
+                            latestTimestamp = timestamp;
+                            targetWindowItem = item;
+                        }
+                    }
+                }
+                if (targetWindowItem) {
+                    console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus target window item with latest timestamp: ${latestTimestamp}`);
+
+                    const targetIndex = this._getMenuItemIndex(targetWindowItem);
+                    if (targetIndex !== -1) {
+                        this._focusMenuItemByIndex(targetIndex);
+                    }
+
+                } else {
+                    console.log(`[FocusDebug] _applyFocusIntent: No target window found for app: ${appToFocus.get_id()}`);
+                }
+
+            } else if (indexToFocus !== null && indexToFocus >= 0) {
+                const focusableItems = Array.from(this._appMenuButton.menu).filter(item => item && item.reactive);
+                if (focusableItems.length > 0) {
+                    if (indexToFocus > 0) {
+                        const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
+                        console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at new index: ${newFocusIndex}`);
+                        this._focusMenuItemByIndex(newFocusIndex);
+                    } else {
+                        console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at new index: 0`);
+                        this._focusMenuItemByIndex(0);
+                    }
+                } else {
+                    console.log(`[FocusDebug] _applyFocusIntent: No focusable items found after closing.`);
+                }
+            }
+        };
+
+
+        setTimeout(focus, 300); // Delay to ensure the menu is fully done before focusing
+
+    }
+
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
@@ -725,7 +845,12 @@ export default class MinimalTimelineExtension extends Extension {
         this._windowTimestamps = new Map();
         this.toBeFocusedNewTimeline = Timeline(null);
         this.toBeFocusedRemoveTimeline = Timeline(null);
+        this.redrawTimeline = Timeline(null);
 
+        this.redrawTimeline.map(() => {
+            console.log("[FocusDebug] Redraw completed, triggering focus intent application.");
+            this._applyFocusIntent();
+        });
 
         if (settings.get_boolean('hide-overview-at-startup')) {
             const hideOverview = () => {
@@ -783,6 +908,7 @@ export default class MinimalTimelineExtension extends Extension {
                         favoritesTimeline: favoritesTimeline,
                         toBeFocusedNewTimeline: this.toBeFocusedNewTimeline,
                         toBeFocusedRemoveTimeline: this.toBeFocusedRemoveTimeline,
+                        redrawTimeline: this.redrawTimeline,
                         closeOnFavLaunchTimeline: closeOnFavLaunchTimeline,
                         closeOnListActivateTimeline: closeOnListActivateTimeline,
                         closeOnListCloseTimeline: closeOnListCloseTimeline,
