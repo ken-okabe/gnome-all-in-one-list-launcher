@@ -14,6 +14,43 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Timeline, Now, combineLatestWith } from './timeline.js';
 
+// =====================================================================
+// === グローバルヘルパー関数 (Global Helper Function) ===
+// =====================================================================
+/**
+ * お気に入り優先と起動順（スタッキングオーダー）の共通ルールで
+ * ウィンドウグループまたはウィンドウのリストをソートします。
+ * この関数はどのクラスにも属さないため、グローバルに利用可能です。
+ * @param {Array<T>} items - ソート対象の配列
+ * @param {string[]} favoriteAppIds - お気に入りアプリのIDリスト
+ * @param {(item: T) => string | undefined} getAppId - itemからアプリIDを取得する関数
+ * @returns {Array<T>} ソート済みの配列（元の配列を直接変更します）
+ * @template T
+ */
+function _sortUsingCommonRules(items, favoriteAppIds, getAppId) {
+    const favoriteOrder = new Map(favoriteAppIds.map((id, index) => [id, index]));
+    const originalOrder = new Map(items.map((item, index) => [item, index]));
+
+    items.sort((a, b) => {
+        const appIdA = getAppId(a);
+        const appIdB = getAppId(b);
+
+        const favIndexA = favoriteOrder.get(appIdA);
+        const favIndexB = favoriteOrder.get(appIdB);
+
+        const aIsFav = favIndexA !== undefined;
+        const bIsFav = favIndexB !== undefined;
+
+        if (aIsFav && !bIsFav) return -1;
+        if (!aIsFav && bIsFav) return 1;
+        if (aIsFav && bIsFav) return favIndexA - favIndexB;
+
+        return originalOrder.get(a) - originalOrder.get(b);
+    });
+
+    return items;
+}
+
 // --- NonClosingPopupBaseMenuItem Class (変更なし) ---
 const NonClosingPopupBaseMenuItem = GObject.registerClass({
     Signals: {
@@ -86,40 +123,61 @@ const WindowModel = GObject.registerClass(
             this._disconnectWindowSignals();
         }
     });
+// extension.js内の既存のRunningAppsIconListクラスを、以下のコードで完全に置き換えてください。
 
-// --- RunningAppsIndicator & IconList Classes (変更なし) ---
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
         _init() {
-            super._init();
-            this._icons = [];
+            super._init({ style_class: 'window-icon-list-container' });
+            this._windowTracker = Shell.WindowTracker.get_default();
         }
-        update(windowGroups) {
+
+        update(windowGroups, favoriteAppIds) {
             this.destroy_all_children();
-            this._icons = [];
             if (!windowGroups) return;
+
+            // 手順1: グループ構造を維持したまま、グループ単位でソートする
+            // (AppMenuButtonと対称的な実装)
+            const getAppIdForGroup = group => group.app.get_id();
+            _sortUsingCommonRules(windowGroups, favoriteAppIds, getAppIdForGroup);
+
+            // 手順2: ソート済みの各グループを順番に処理する
             for (const group of windowGroups) {
-                const icon = new St.Icon({ gicon: group.app.get_icon(), style_class: 'system-status-icon' });
-                const button = new St.Button({ child: icon });
-                button.connect('clicked', () => {
-                    if (group.windows.length > 0) Main.activateWindow(group.windows[0]);
+                // 手順3: 各グループの内部で、ウィンドウをX座標でソートする
+                const sortedWindows = group.windows.sort((winA, winB) => {
+                    return winA.get_frame_rect().x - winB.get_frame_rect().x;
                 });
-                this.add_child(button);
-                this._icons.push(button);
+
+                // 手順4: ソートされたウィンドウの順序でアイコンを描画する
+                for (const win of sortedWindows) {
+                    const app = this._windowTracker.get_window_app(win);
+                    if (!app) continue;
+
+                    const icon = new St.Icon({ gicon: app.get_icon(), style_class: 'panel-window-icon' });
+                    const button = new St.Button({ child: icon, style_class: 'panel-button' });
+                    button.connect('clicked', () => Main.activateWindow(win));
+                    this.add_child(button);
+                }
             }
         }
     }
 );
 
+// --- RunningAppsIndicator クラス: 新定義に差し替え ---
 const RunningAppsIndicator = GObject.registerClass(
     class RunningAppsIndicator extends PanelMenu.Button {
-        _init({ windowsTimeline }) {
+        _init({ windowsTimeline, favoritesTimeline }) {
             super._init(0.0, null, false);
             this.reactive = false;
             this._iconList = new RunningAppsIconList();
             this.add_child(this._iconList);
-            windowsTimeline.map(windowGroups => {
-                this._iconList?.update(windowGroups);
+
+            const combinedTimeline = combineLatestWith(
+                (win, fav) => ({ win, fav })
+            )(windowsTimeline)(favoritesTimeline);
+
+            combinedTimeline.map(({ win, fav }) => {
+                this._iconList?.update(win, fav);
             });
         }
         destroy() {
@@ -605,18 +663,8 @@ const AppMenuButton = GObject.registerClass(
             }
         }
         _sortWindowGroups(windowGroups, favoriteAppIds) {
-            const favoriteOrder = new Map(favoriteAppIds.map((id, index) => [id, index]));
-            windowGroups.sort((a, b) => {
-                const favIndexA = favoriteOrder.get(a.app.get_id());
-                const favIndexB = favoriteOrder.get(b.app.get_id());
-                const aIsFav = favIndexA !== undefined;
-                const bIsFav = favIndexB !== undefined;
-                if (aIsFav && !bIsFav) return -1;
-                if (!aIsFav && bIsFav) return 1;
-                if (aIsFav && bIsFav) return favIndexA - favIndexB;
-                return 0;
-            });
-            return windowGroups;
+            // _sortWindowGroups メソッドの中身をこれだけにします
+            return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
         _updateWindowsSection(windowGroups, favoriteAppIds) {
             this._windowsContainer.forEach(child => child.destroy());
@@ -799,8 +847,30 @@ export default class MinimalTimelineExtension extends Extension {
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
         const settings = this.getSettings();
 
+        // ★ 修正: シンプルで確実なOverview非表示処理
         if (settings.get_boolean('hide-overview-at-startup')) {
-            Main.overview.hide();
+            // 段階的に試行する
+            const hideOverview = () => {
+                try {
+                    if (Main.overview.visible) {
+                        Main.overview.hide();
+                        console.log('Overview hidden at startup');
+                        return true;
+                    }
+                } catch (e) {
+                    console.warn('Failed to hide overview:', e.message);
+                }
+                return false;
+            };
+
+            // 即座に試行
+            if (!hideOverview()) {
+                // 失敗した場合、少し待ってから再試行
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+                    hideOverview();
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
         }
 
         this._lifecycleTimeline.bind(isEnabled => {
@@ -855,6 +925,7 @@ export default class MinimalTimelineExtension extends Extension {
 
                     this._runningAppsIndicator = new RunningAppsIndicator({
                         windowsTimeline: this._windowModel.windowsTimeline,
+                        favoritesTimeline: favoritesTimeline, // favoritesTimeline を渡す
                     });
                     this._runningAppsIndicator.visible = show;
                     Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, rank + 1, pos);
