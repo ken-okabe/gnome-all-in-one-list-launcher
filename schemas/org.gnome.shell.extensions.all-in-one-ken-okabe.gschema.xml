@@ -9,6 +9,12 @@
     <key name="show-window-icon-list" type="b"><default>true</default></key>
     <key name="hide-overview-at-startup" type="b"><default>true</default></key>
 
+    <key name="close-on-fav-launch" type="b"><default>false</default></key>
+    <key name="close-on-list-activate" type="b"><default>false</default></key>
+    <key name="close-on-list-close" type="b"><default>false</default></key>
+
+    <key name="open-popup-shortcut" type="as"><default>[]</default></key>
+
     <key name="shortcut-0" type="as"><default>[]</default></key>
     <key name="shortcut-1" type="as"><default>[]</default></key>
     <key name="shortcut-2" type="as"><default>[]</default></key>
@@ -39,8 +45,6 @@
     <key name="shortcut-27" type="as"><default>[]</default></key>
     <key name="shortcut-28" type="as"><default>[]</default></key>
     <key name="shortcut-29" type="as"><default>[]</default></key>
-
-    <key name="open-popup-shortcut" type="as"><default>[]</default></key>
 
   </schema>
 </schemalist>

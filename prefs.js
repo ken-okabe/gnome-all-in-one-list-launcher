@@ -1,10 +1,12 @@
-// prefs.js (最終版)
+// prefs.js
 
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk';
 import GObject from 'gi://GObject';
+
+
 
 import {
     ExtensionPreferences,
@@ -64,7 +66,6 @@ const KeybindingDialog = GObject.registerClass(
                 valign: Gtk.Align.CENTER,
                 css_classes: ['flat'],
                 tooltip_text: _('Clear Shortcut'),
-                // ★ 1. クリアボタンがキーボードフォーカスを受け取らないように設定
                 can_focus: false,
             });
             clearButton.connect('clicked', () => this._clearShortcut());
@@ -119,7 +120,6 @@ const KeybindingDialog = GObject.registerClass(
                 const binding = Gtk.accelerator_name_with_keycode(null, keyval, keycode, mask);
                 this._setShortcut(binding);
                 this.setButton.set_sensitive(true);
-                // ★ 2. ショートカット設定後、Setボタンにフォーカスを移動
                 this.setButton.grab_focus();
             } else {
                 this._clearShortcut();
@@ -131,7 +131,6 @@ const KeybindingDialog = GObject.registerClass(
         _clearShortcut() {
             this._setShortcut('');
             this.setButton.set_sensitive(true);
-            // ★ 2. クリア後も、Setボタンにフォーカスを移動
             this.setButton.grab_focus();
         }
 
@@ -187,7 +186,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         this._settings = this.getSettings();
         this._favoritesSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
         this._activeConnections = [];
-        window.set_default_size(1050, 850);
+        window.set_default_size(800, 1050);
 
         window.add(this._buildFavoritesPage());
         window.add(this._buildActionsPage());
@@ -212,10 +211,10 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         this._createShortcutRow(mainShortcutGroup, _('Open Popup Menu'), 'open-popup-shortcut');
 
         const favoritesGroup = new Adw.PreferencesGroup({
-            title: _('Favorite App Shortcuts'),
+            title: _('Favorite Apps and Shortcuts'),
             description: _('Reorder your favorite applications and assign global keyboard shortcuts here.') + '\n\n' +
-                _('• Favorite App (in popup):') + ' ' + _('Always tries to launch a new window or instance.') + '\n' +
-                _('• Favorite Shortcut:') + ' ' + _('Brings an open window into focus, or launches the app if it\'s not running.')
+                _('• Favorite App Launcher in Popup Menu') + '\n' + _('    Always tries to launch a new window or instance.') + '\n' +
+                _('• Favorite Shortcut Keys Assigned Here') + '\n' + _('    Brings an open window into focus, or launches the app if it\'s not running.')
         });
         page.add(favoritesGroup);
 
@@ -357,6 +356,30 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const winCloseRow = new Adw.ActionRow({ title: _('Close Instance') });
         winCloseRow.add_suffix(new Gtk.Label({ label: 'Backspace', css_classes: ['heading'] }));
         winGroup.add(winCloseRow);
+
+        const closeOptionsGroup = new Adw.PreferencesGroup({ title: _('Automatic Closing Options') });
+        page.add(closeOptionsGroup);
+
+        const closeOnFavRow = new Adw.SwitchRow({
+            title: _('Close after Favorite Launch'),
+            subtitle: _('Closes the popup after launching an app from the favorites bar.')
+        });
+        this._settings.bind('close-on-fav-launch', closeOnFavRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        closeOptionsGroup.add(closeOnFavRow);
+
+        const closeOnActivateRow = new Adw.SwitchRow({
+            title: _('Close after Window Activation'),
+            subtitle: _('Closes the popup after activating a window from the list.')
+        });
+        this._settings.bind('close-on-list-activate', closeOnActivateRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        closeOptionsGroup.add(closeOnActivateRow);
+
+        const closeOnCloseRow = new Adw.SwitchRow({
+            title: _('Close after Window Close'),
+            subtitle: _('Closes the popup after closing a window from the list.')
+        });
+        this._settings.bind('close-on-list-close', closeOnCloseRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        closeOptionsGroup.add(closeOnCloseRow);
 
         return page;
     }

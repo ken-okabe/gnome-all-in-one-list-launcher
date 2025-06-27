@@ -192,7 +192,8 @@ const RunningAppsIndicator = GObject.registerClass(
 // --- AppMenuButton Class (変更なし) ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
-        _init({ windowsTimeline, favoritesTimeline, extension, settings }) {
+        // 【置換後の _init メソッド】
+        _init({ windowsTimeline, favoritesTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
             this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
@@ -210,6 +211,9 @@ const AppMenuButton = GObject.registerClass(
             this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
             this._windowsTimeline = windowsTimeline;
             this._favoritesTimeline = favoritesTimeline;
+            this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
+            this._closeOnListActivateTimeline = closeOnListActivateTimeline;
+            this._closeOnListCloseTimeline = closeOnListCloseTimeline;
             this._initializeMenuStructure();
             this._favoritesTimeline.map(favoriteAppIds => {
                 if (this._isDestroyed) return;
@@ -255,6 +259,7 @@ const AppMenuButton = GObject.registerClass(
             this._favoriteButtons = [];
             this._lastSelectedIndex = null;
         }
+        // 【置換後の _handleFavLaunch メソッド】
         _handleFavLaunch() {
             this._flashIcon('blue');
             const selectedIndex = this._selectedFavoriteIndexTimeline.at(Now);
@@ -263,7 +268,15 @@ const AppMenuButton = GObject.registerClass(
                 const appId = favs[selectedIndex];
                 if (appId) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
-                    if (app) { this._launchNewInstance(app); this._resetMenuState(); }
+                    if (app) {
+                        this._launchNewInstance(app);
+                        if (this._closeOnFavLaunchTimeline.at(Now)) {
+                            this.menu.close();
+                        }
+                        else {
+                            this._resetMenuState();
+                        }
+                    }
                 }
             }
         }
@@ -428,145 +441,23 @@ const AppMenuButton = GObject.registerClass(
             };
         }
 
+        // 【新規追加する _isAppLaunchable メソッド】
+        _isAppLaunchable(app) {
+            if (!app) {
+                return false;
+            }
+            const appInfo = app.get_app_info();
+            if (!appInfo) {
+                return false;
+            }
+            return appInfo.should_show();
+        }
+
         /**
          * アプリケーションの新規インスタンス起動プロセスを開始します。
          * @param {Shell.App} app - 起動するアプリケーションオブジェクト。
          */
-        // _launchNewInstance(app) {
-        //     if (this._isDestroyed) {
-        //         console.warn("Attempted to launch on a destroyed instance.");
-        //         return;
-        //     }
 
-        //     console.log(`Starting sequential launch attempts for app: ${app.get_id()}`);
-
-        //     const self = this;
-
-        //     // 各試行の結果を受け取るTimeline
-        //     const attempt1Result = Timeline(null);
-        //     const attempt2Result = Timeline(null);
-        //     const attempt3Result = Timeline(null);
-        //     const attempt4Result = Timeline(null);
-        //     const finalResult = Timeline(null);
-
-        //     // 初期値でチェーンを開始
-        //     const initialTrigger = Timeline({ app, attemptNumber: 1 });
-
-        //     const launchChain = initialTrigger
-        //         .bind(({ app, attemptNumber }) => {
-        //             console.log(`--- Attempt ${attemptNumber}: request_new_window ---`);
-
-        //             // 非同期的に結果を決定
-        //             setTimeout(() => {
-        //                 try {
-        //                     app.request_new_window(-1, null);
-        //                     console.log("✅ request_new_window succeeded");
-        //                     // 成功時は最終結果に成功を通知
-        //                     finalResult.define(Now, { success: true, method: 'request_new_window' });
-        //                 } catch (e) {
-        //                     console.warn(`❌ request_new_window failed: ${e.message}`);
-        //                     // 失敗時は次の試行をトリガー
-        //                     attempt1Result.define(Now, { app, attemptNumber: 2 });
-        //                 }
-        //             }, 10); // 短い遅延で非同期処理をシミュレート
-
-        //             return attempt1Result;
-        //         })
-        //         .bind(({ app, attemptNumber }) => {
-        //             if (attemptNumber !== 2) return attempt2Result; // 既に成功している場合はスキップ
-
-        //             console.log(`--- Attempt ${attemptNumber}: activate_action ---`);
-
-        //             setTimeout(() => {
-        //                 try {
-        //                     app.activate_action('new-window', [], -1);
-        //                     console.log("✅ activate_action succeeded");
-        //                     finalResult.define(Now, { success: true, method: 'activate_action' });
-        //                 } catch (e) {
-        //                     console.warn(`❌ activate_action failed: ${e.message}`);
-        //                     attempt2Result.define(Now, { app, attemptNumber: 3 });
-        //                 }
-        //             }, 10);
-
-        //             return attempt2Result;
-        //         })
-        //         .bind(({ app, attemptNumber }) => {
-        //             if (attemptNumber !== 3) return attempt3Result; // 既に成功している場合はスキップ
-
-        //             console.log(`--- Attempt ${attemptNumber}: command_line ---`);
-
-        //             setTimeout(() => {
-        //                 try {
-        //                     const appId = app.get_id();
-        //                     let command = null;
-
-        //                     // アプリケーション固有のコマンドを設定
-        //                     if (appId === 'org.gnome.Nautilus.desktop') {
-        //                         command = 'nautilus --new-window';
-        //                     } else if (appId === 'org.gnome.Terminal.desktop') {
-        //                         command = 'gnome-terminal --window';
-        //                     } else if (appId === 'org.gnome.Console.desktop') {
-        //                         command = 'kgx';
-        //                     } else {
-        //                         // 汎用的なコマンド生成
-        //                         const executableName = app.get_app_info().get_executable();
-        //                         command = executableName ? `${executableName} --new-window` : null;
-        //                     }
-
-        //                     if (command) {
-        //                         console.log(`  Executing command: ${command}`);
-        //                         GLib.spawn_command_line_async(command);
-        //                         console.log("✅ command_line succeeded");
-        //                         finalResult.define(Now, { success: true, method: 'command_line' });
-        //                     } else {
-        //                         throw new Error("No suitable command found");
-        //                     }
-        //                 } catch (e) {
-        //                     console.warn(`❌ command_line failed: ${e.message}`);
-        //                     attempt3Result.define(Now, { app, attemptNumber: 4 });
-        //                 }
-        //             }, 10);
-
-        //             return attempt3Result;
-        //         })
-        //         .bind(({ app, attemptNumber }) => {
-        //             if (attemptNumber !== 4) return attempt4Result; // 既に成功している場合はスキップ
-
-        //             console.log(`--- Attempt ${attemptNumber}: fallback launch ---`);
-
-        //             setTimeout(() => {
-        //                 try {
-        //                     app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT);
-        //                     console.log("✅ fallback launch succeeded");
-        //                     finalResult.define(Now, { success: true, method: 'launch' });
-        //                 } catch (e) {
-        //                     console.error(`💥 All launch attempts failed. Final error: ${e.message}`);
-        //                     finalResult.define(Now, {
-        //                         success: false,
-        //                         error: e.message,
-        //                         appName: app.get_name()
-        //                     });
-        //                 }
-        //             }, 10);
-
-        //             return attempt4Result;
-        //         });
-
-        //     // 最終結果の処理
-        //     finalResult.map(result => {
-        //         if (result.success) {
-        //             console.log(`🎉 Application launched successfully using method: ${result.method}`);
-        //             // 成功時の追加処理があればここに記述
-        //         } else {
-        //             console.error(`💥 Failed to launch ${result.appName}: ${result.error}`);
-        //             Main.notify('Error launching application', `Could not launch ${result.appName}`);
-        //         }
-        //         return result;
-        //     });
-
-        //     // チェーンを開始
-        //     initialTrigger.define(Now, { app, attemptNumber: 1 });
-        // }
 
         // より簡潔な代替実装（Timelineを使わない場合）
         _launchNewInstance(app) {
@@ -652,7 +543,10 @@ const AppMenuButton = GObject.registerClass(
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (!app) continue;
                     const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'favorite-bar-app-icon' }), style_class: 'favorite-button', can_focus: false, track_hover: true });
-                    button.connect('clicked', () => { this._selectedFavoriteIndexTimeline.define(Now, index); this._launchNewInstance(app); });
+                    button.connect('clicked', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                        this._handleFavLaunch();
+                    });
                     button.connect('enter-event', () => { this._selectedFavoriteIndexTimeline.define(Now, index); });
                     this._favoriteButtons[index] = button;
                     favoritesBox.add_child(button);
@@ -666,6 +560,7 @@ const AppMenuButton = GObject.registerClass(
             // _sortWindowGroups メソッドの中身をこれだけにします
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
+
         _updateWindowsSection(windowGroups, favoriteAppIds) {
             this._windowsContainer.forEach(child => child.destroy());
             this._windowsContainer = [];
@@ -687,11 +582,17 @@ const AppMenuButton = GObject.registerClass(
                     hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER, style_class: 'app-header-title' }));
                     hbox.add_child(new St.Widget({ x_expand: true }));
                     const actionsContainer = new St.BoxLayout({ style_class: 'item-actions-container' });
-                    const isFavorite = favoriteAppIds.includes(group.app.get_id());
-                    const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
-                    const starButton = new St.Button({ style_class: 'favorite-star-button', child: new St.Icon({ icon_name: starIcon, style_class: 'popup-menu-icon' }) });
-                    starButton.connect('clicked', () => { this._extension._toggleFavorite(group.app.get_id()); });
-                    actionsContainer.add_child(starButton);
+
+                    // ↓↓↓ ここで新しいヘルパーメソッドが使用されます ↓↓↓
+                    if (this._isAppLaunchable(group.app)) {
+                        const isFavorite = favoriteAppIds.includes(group.app.get_id());
+                        const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
+                        const starButton = new St.Button({ style_class: 'favorite-star-button', child: new St.Icon({ icon_name: starIcon, style_class: 'popup-menu-icon' }) });
+                        starButton.connect('clicked', () => { this._extension._toggleFavorite(group.app.get_id()); });
+                        actionsContainer.add_child(starButton);
+                    }
+                    // ↑↑↑ 修正はここまでです ↑↑↑
+
                     const groupCloseButton = new St.Button({ style_class: 'window-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                     groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
                     actionsContainer.add_child(groupCloseButton);
@@ -724,8 +625,24 @@ const AppMenuButton = GObject.registerClass(
                 this._windowsContainer.push(noWindowsItem);
             }
         }
-        _handleWindowActivate(actor, item, itemType) { this._flashIcon('green'); this._activateSelection(actor, item, itemType); }
-        _handleWindowClose(actor, item, itemType) { this._flashIcon('red'); this._closeSelection(actor, item, itemType); this._resetMenuState(); }
+        _handleWindowActivate(actor, item, itemType) {
+            this._flashIcon('green');
+            this._activateSelection(actor, item, itemType);
+            if (this._closeOnListActivateTimeline.at(Now)) {
+                this.menu.close();
+            }
+        }
+        // 【置換後の _handleWindowClose メソッド】
+        _handleWindowClose(actor, item, itemType) {
+            this._flashIcon('red');
+            this._closeSelection(actor, item, itemType);
+            if (this._closeOnListCloseTimeline.at(Now)) {
+                this.menu.close();
+            }
+            else {
+                this._resetMenuState();
+            }
+        }
         _closeSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
             if (itemType === 'group') item.windows.forEach(win => win.delete(global.get_current_time()));
@@ -842,6 +759,7 @@ export default class MinimalTimelineExtension extends Extension {
         }
     }
 
+    // 【置換後の enable メソッド】
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
@@ -914,10 +832,16 @@ export default class MinimalTimelineExtension extends Extension {
                     this._runningAppsIndicator?.destroy();
 
                     const favoritesTimeline = this._createStrvSettingTimeline(this._favsSettings, 'favorite-apps');
+                    const closeOnFavLaunchTimeline = this._createBooleanSettingTimeline(settings, 'close-on-fav-launch');
+                    const closeOnListActivateTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-activate');
+                    const closeOnListCloseTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-close');
 
                     this._appMenuButton = new AppMenuButton({
                         windowsTimeline: this._windowModel.windowsTimeline,
                         favoritesTimeline: favoritesTimeline,
+                        closeOnFavLaunchTimeline: closeOnFavLaunchTimeline,
+                        closeOnListActivateTimeline: closeOnListActivateTimeline,
+                        closeOnListCloseTimeline: closeOnListCloseTimeline,
                         extension: this,
                         settings: settings,
                     });
@@ -925,7 +849,7 @@ export default class MinimalTimelineExtension extends Extension {
 
                     this._runningAppsIndicator = new RunningAppsIndicator({
                         windowsTimeline: this._windowModel.windowsTimeline,
-                        favoritesTimeline: favoritesTimeline, // favoritesTimeline を渡す
+                        favoritesTimeline: favoritesTimeline,
                     });
                     this._runningAppsIndicator.visible = show;
                     Main.panel.addToStatusArea(`${this.uuid}-RunningAppsIndicator`, this._runningAppsIndicator, rank + 1, pos);
