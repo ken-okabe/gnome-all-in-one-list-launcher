@@ -139,7 +139,6 @@ const AppMenuButton = GObject.registerClass(
             this._isDestroyed = false;
             this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
             this.add_child(this._panelIcon);
-            this._initMenuStateMonitoring();  // ← 追加
             this._extension = extension;
             this._settings = settings;
             this._favoritesContainer = null;
@@ -228,6 +227,14 @@ const AppMenuButton = GObject.registerClass(
         }
         _onMenuKeyPress(actor, event) {
             const symbol = event.get_key_symbol();
+
+            // ★ 新規追加: ショートカットキーでメニューを閉じる機能
+            if (this._isMenuCloseShortcut(symbol, event)) {
+                this._flashIcon('purple'); // 閉じる動作を視覚的に示す
+                this.menu.close();
+                return Clutter.EVENT_STOP;
+            }
+
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
                 this._flashIcon('orange');
                 const favs = this._extension._favsSettings.get_strv('favorite-apps');
@@ -246,53 +253,121 @@ const AppMenuButton = GObject.registerClass(
             return Clutter.EVENT_PROPAGATE;
         }
 
-        /**
-         * メニューの開閉状態を監視してアイコンの色を変更
-         */
-        _initMenuStateMonitoring() {
-            // メニューの開閉状態変化を監視
-            this.menu.connect('open-state-changed', (menu, isOpen) => {
-                this._updateIconForMenuState(isOpen);
-            });
-            // 初期状態の設定
-            this._updateIconForMenuState(false);
-        }
+        // ★ 新規メソッド: 現在押されたキーがメニューを閉じるショートカットキーかどうかを判定
+        _isMenuCloseShortcut(symbol, event) {
+            // 設定からopen-popup-shortcutを取得
+            const settings = this._extension.getSettings();
+            const shortcutKeys = settings.get_strv('open-popup-shortcut');
 
-        /**
-         * メニューの状態に応じてアイコンの色を更新
-         * @param {boolean} isOpen - メニューが開いているかどうか
-         */
-        _updateIconForMenuState(isOpen) {
-            if (this._isDestroyed || !this._panelIcon || this._panelIcon.is_destroyed) {
-                return;
+            if (!shortcutKeys || shortcutKeys.length === 0) {
+                return false;
             }
-            if (isOpen) {
-                // メニューが開いている時: 緑色
-                this._panelIcon.set_style('color: #4ade80; background-color: rgba(74, 222, 128, 0.2); border-radius: 4px; padding: 2px;');
-            } else {
-                // メニューが閉じている時: デフォルト色に戻す
-                this._panelIcon.set_style('');
-            }
-        }
 
-        /**
-         * デバッグ用: 判定結果を一瞬だけアイコン色で表示
-         * @param {boolean} isOpen - 現在の開閉状態
-         */
-        _showDebugState(isOpen) {
-            if (this._isDestroyed || !this._panelIcon || this._panelIcon.is_destroyed) {
-                return;
+            // ショートカットキーの文字列をパース（例: "<Super>space"）
+            const shortcutString = shortcutKeys[0];
+            const parsedShortcut = this._parseShortcutString(shortcutString);
+
+            if (!parsedShortcut) {
+                return false;
             }
-            // 判定結果を色で表示 (赤=開いている, 青=閉じている)
-            const debugColor = isOpen ? '#ef4444' : '#3b82f6';
-            this._panelIcon.set_style(`color: ${debugColor}; background-color: rgba(255, 255, 255, 0.3); border-radius: 4px; padding: 2px; border: 2px solid ${debugColor};`);
-            // 300ms後に通常の状態表示に戻す
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
-                if (this._panelIcon && !this._panelIcon.is_destroyed) {
-                    this._updateIconForMenuState(this.menu.isOpen);
+
+            // 修飾キーの状態をチェック
+            const modifierState = event.get_state();
+
+            // 各修飾キーが正しく押されているかチェック
+            let modifiersMatch = true;
+            for (const modifier of parsedShortcut.modifiers) {
+                if (!(modifierState & modifier)) {
+                    modifiersMatch = false;
+                    break;
                 }
-                return GLib.SOURCE_REMOVE;
-            });
+            }
+
+            if (!modifiersMatch) {
+                return false;
+            }
+
+            // キーシンボルが一致するかチェック
+            return symbol === parsedShortcut.key;
+        }
+
+        // ★ 新規メソッド: ショートカット文字列をパースして修飾キーとキーシンボルに分解
+        _parseShortcutString(shortcutString) {
+            if (!shortcutString || shortcutString.trim() === '') {
+                return null;
+            }
+
+            const modifiers = [];
+            let keyName = shortcutString;
+
+            // 修飾キーを抽出
+            if (shortcutString.includes('<Super>')) {
+                modifiers.push(Clutter.ModifierType.SUPER_MASK);
+                keyName = keyName.replace('<Super>', '');
+            }
+            if (shortcutString.includes('<Control>')) {
+                modifiers.push(Clutter.ModifierType.CONTROL_MASK);
+                keyName = keyName.replace('<Control>', '');
+            }
+            if (shortcutString.includes('<Alt>')) {
+                modifiers.push(Clutter.ModifierType.MOD1_MASK);
+                keyName = keyName.replace('<Alt>', '');
+            }
+            if (shortcutString.includes('<Shift>')) {
+                modifiers.push(Clutter.ModifierType.SHIFT_MASK);
+                keyName = keyName.replace('<Shift>', '');
+            }
+
+            // キー名をClutterのキーシンボルに変換
+            let keySymbol;
+            switch (keyName.toLowerCase()) {
+                case 'space':
+                    keySymbol = Clutter.KEY_space;
+                    break;
+                case 'tab':
+                    keySymbol = Clutter.KEY_Tab;
+                    break;
+                case 'return':
+                case 'enter':
+                    keySymbol = Clutter.KEY_Return;
+                    break;
+                case 'escape':
+                    keySymbol = Clutter.KEY_Escape;
+                    break;
+                case 'f1': keySymbol = Clutter.KEY_F1; break;
+                case 'f2': keySymbol = Clutter.KEY_F2; break;
+                case 'f3': keySymbol = Clutter.KEY_F3; break;
+                case 'f4': keySymbol = Clutter.KEY_F4; break;
+                case 'f5': keySymbol = Clutter.KEY_F5; break;
+                case 'f6': keySymbol = Clutter.KEY_F6; break;
+                case 'f7': keySymbol = Clutter.KEY_F7; break;
+                case 'f8': keySymbol = Clutter.KEY_F8; break;
+                case 'f9': keySymbol = Clutter.KEY_F9; break;
+                case 'f10': keySymbol = Clutter.KEY_F10; break;
+                case 'f11': keySymbol = Clutter.KEY_F11; break;
+                case 'f12': keySymbol = Clutter.KEY_F12; break;
+                default:
+                    // 単一文字の場合
+                    if (keyName.length === 1) {
+                        const char = keyName.toLowerCase();
+                        if (char >= 'a' && char <= 'z') {
+                            keySymbol = Clutter.KEY_a + (char.charCodeAt(0) - 'a'.charCodeAt(0));
+                        } else if (char >= '0' && char <= '9') {
+                            keySymbol = Clutter.KEY_0 + (char.charCodeAt(0) - '0'.charCodeAt(0));
+                        }
+                    }
+                    break;
+            }
+
+            if (keySymbol === undefined) {
+                console.warn(`Unknown key name: ${keyName}`);
+                return null;
+            }
+
+            return {
+                modifiers: modifiers,
+                key: keySymbol
+            };
         }
 
         /**
@@ -700,19 +775,7 @@ export default class MinimalTimelineExtension extends Extension {
     }
 
     _onOpenPopupShortcut() {
-        const isCurrentlyOpen = this._appMenuButton?.menu.isOpen;
-        // デバッグ用: 判定結果をアイコン色で一瞬表示
-        this._appMenuButton?._showDebugState(isCurrentlyOpen);
-        if (isCurrentlyOpen) {
-            // Wayland環境でのキーボードイベントシミュレーション
-            try {
-                this._appMenuButton?.menu.toggle();
-            } catch (e) {
-                logError(e);
-            }
-        } else {
-            this._appMenuButton?.menu.toggle();
-        }
+        this._appMenuButton?.menu.open();
     }
 
     _onFavoriteShortcut(index) {
