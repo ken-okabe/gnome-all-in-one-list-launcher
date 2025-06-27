@@ -271,9 +271,13 @@ const AppMenuButton = GObject.registerClass(
             this._selectedFavoriteIndexTimeline.define(Now, null);
         }
 
+        // 【修正後】の _applyFocusIntent メソッド
+
         _applyFocusIntent() {
             const appToFocus = this.toBeFocusedNewTimeline.at(Now);
             const indexToFocus = this.toBeFocusedRemoveTimeline.at(Now);
+
+            console.log(`[FocusDebug] _applyFocusIntent: Called. appToFocus: ${appToFocus?.get_id() || 'null'}, indexToFocus: ${indexToFocus}`);
 
             if (!appToFocus && indexToFocus === null) return;
 
@@ -281,37 +285,50 @@ const AppMenuButton = GObject.registerClass(
             this.toBeFocusedNewTimeline.define(Now, null);
             this.toBeFocusedRemoveTimeline.define(Now, null);
 
-            if (appToFocus) {
-                const allWindowItems = this._windowsContainer.filter(item => item && item._itemType === 'window');
-                let targetWindowItem = null;
-                let latestTimestamp = -1;
+            // ★★★ BUG FIX: Defer focus change until the UI is idle.
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                if (this._isDestroyed) return GLib.SOURCE_REMOVE;
 
-                for (const item of allWindowItems) {
-                    const [win, timestamp] = item._itemData;
-                    const itemApp = this._extension._windowModel._windowTracker.get_window_app(win);
-                    if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
-                        if (timestamp > latestTimestamp) {
-                            latestTimestamp = timestamp;
-                            targetWindowItem = item;
+                if (appToFocus) {
+                    const allWindowItems = this._windowsContainer.filter(item => item && item._itemType === 'window');
+                    let targetWindowItem = null;
+                    let latestTimestamp = -1;
+
+                    for (const item of allWindowItems) {
+                        const [win, timestamp] = item._itemData;
+                        const itemApp = this._extension._windowModel._windowTracker.get_window_app(win);
+                        if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
+                            console.log(`[FocusDebug] _applyFocusIntent (idle): Found matching window with timestamp: ${timestamp}`);
+                            if (timestamp > latestTimestamp) {
+                                latestTimestamp = timestamp;
+                                targetWindowItem = item;
+                            }
                         }
                     }
-                }
-                // ★★★ BUG FIX: Correct way to set focus is assigning to the `active_item` property.
-                if (targetWindowItem) this.menu.active_item = targetWindowItem;
-
-            } else if (indexToFocus !== null && indexToFocus >= 0) {
-                const focusableItems = Array.from(this.menu).filter(item => item && item.reactive);
-                if (focusableItems.length > 0) {
-                    if (indexToFocus > 0) {
-                        const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
-                        // ★★★ BUG FIX: Correct way to set focus.
-                        this.menu.active_item = focusableItems[newFocusIndex];
+                    if (targetWindowItem) {
+                        console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus target window item with latest timestamp: ${latestTimestamp}`);
+                        this.menu.active_item = targetWindowItem;
                     } else {
-                        // ★★★ BUG FIX: Correct way to set focus.
-                        this.menu.active_item = focusableItems[0];
+                        console.log(`[FocusDebug] _applyFocusIntent (idle): No target window found for app: ${appToFocus.get_id()}`);
+                    }
+
+                } else if (indexToFocus !== null && indexToFocus >= 0) {
+                    const focusableItems = Array.from(this.menu).filter(item => item && item.reactive);
+                    if (focusableItems.length > 0) {
+                        if (indexToFocus > 0) {
+                            const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
+                            console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus item at new index: ${newFocusIndex}`);
+                            this.menu.active_item = focusableItems[newFocusIndex];
+                        } else {
+                            console.log(`[FocusDebug] _applyFocusIntent (idle): Attempting to focus item at new index: 0`);
+                            this.menu.active_item = focusableItems[0];
+                        }
+                    } else {
+                        console.log(`[FocusDebug] _applyFocusIntent (idle): No focusable items found after closing.`);
                     }
                 }
-            }
+                return GLib.SOURCE_REMOVE; // Run only once
+            });
         }
 
         _flashIcon(color) {
@@ -344,6 +361,7 @@ const AppMenuButton = GObject.registerClass(
                 if (appId) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (app) {
+                        console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`); // ★ この行を挿入
                         this.toBeFocusedNewTimeline.define(Now, app);
                         this.toBeFocusedRemoveTimeline.define(Now, null);
                         this._launchNewInstance(app);
@@ -573,6 +591,7 @@ const AppMenuButton = GObject.registerClass(
             this.toBeFocusedNewTimeline.define(Now, null);
             const focusableItems = Array.from(this.menu).filter(i => i && i.reactive);
             const itemIndex = focusableItems.indexOf(actor);
+            console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`); // ★ この行を挿入
             this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
 
             this._closeSelection(actor, item, itemType);
