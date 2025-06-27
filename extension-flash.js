@@ -51,7 +51,7 @@ function _sortUsingCommonRules(items, favoriteAppIds, getAppId) {
     return items;
 }
 
-// --- NonClosingPopupBaseMenuItem Class ---
+// --- NonClosingPopupBaseMenuItem Class (変更なし) ---
 const NonClosingPopupBaseMenuItem = GObject.registerClass({
     Signals: {
         'custom-activate': {},
@@ -86,20 +86,19 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
     }
 });
 
-
-// --- WindowModel Class ---
+// --- WindowModel Class (変更なし) ---
 const WindowModel = GObject.registerClass(
     class WindowModel extends GObject.Object {
-        _init({ windowTimestamps }) {
+        _init({ windowTimestamps }) { // ★ 引数で辞書を受け取る
             super._init();
             this.windowsTimeline = Timeline([]);
             this._windowTracker = Shell.WindowTracker.get_default();
             this._signalIds = new Map();
+            // ★ メインクラスから渡された辞書の参照を保持
             this._windowTimestamps = windowTimestamps;
             this._trackerChangedId = this._windowTracker.connect('tracked-windows-changed', () => this.update());
             this.update();
         }
-
         update() {
             this._disconnectWindowSignals();
             const windowGroups = new Map();
@@ -117,6 +116,7 @@ const WindowModel = GObject.registerClass(
                 const s = w.connect('notify::title', () => this.update());
                 this._signalIds.set(w, s);
 
+                // ★ 辞書にIDがなければ追加
                 if (!this._windowTimestamps.has(windowId)) {
                     this._windowTimestamps.set(windowId, Date.now());
                 }
@@ -126,9 +126,11 @@ const WindowModel = GObject.registerClass(
                 if (!windowGroups.has(i)) {
                     windowGroups.set(i, { app: a, windows: [] });
                 }
+                // ★ データ構造を [window, timestamp] に
                 windowGroups.get(i).windows.push([w, timestamp]);
             }
 
+            // ★ 不要になったIDを辞書から削除
             for (const oldId of this._windowTimestamps.keys()) {
                 if (!currentWindowIds.has(oldId)) {
                     this._windowTimestamps.delete(oldId);
@@ -137,7 +139,6 @@ const WindowModel = GObject.registerClass(
 
             this.windowsTimeline.define(Now, Array.from(windowGroups.values()));
         }
-
         _disconnectWindowSignals() {
             for (const [w, i] of this._signalIds) {
                 try { if (w && !w.is_destroyed) w.disconnect(i); } catch (e) { }
@@ -149,8 +150,8 @@ const WindowModel = GObject.registerClass(
             this._disconnectWindowSignals();
         }
     });
+// extension.js内の既存のRunningAppsIconListクラスを、以下のコードで完全に置き換えてください。
 
-// --- RunningAppsIconList Class ---
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
         _init() {
@@ -166,10 +167,12 @@ const RunningAppsIconList = GObject.registerClass(
             _sortUsingCommonRules(windowGroups, favoriteAppIds, getAppIdForGroup);
 
             for (const group of windowGroups) {
+                // ★ データ構造変更対応: タイムスタンプはX座標ソートに不要なので無視
                 const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => {
                     return winA.get_frame_rect().x - winB.get_frame_rect().x;
                 });
 
+                // ★ データ構造変更対応: 分割代入でウィンドウオブジェクトのみ使用
                 for (const [win, timestamp] of sortedWindows) {
                     const app = this._windowTracker.get_window_app(win);
                     if (!app) continue;
@@ -184,8 +187,7 @@ const RunningAppsIconList = GObject.registerClass(
     }
 );
 
-
-// --- RunningAppsIndicator クラス ---
+// --- RunningAppsIndicator クラス: 新定義に差し替え ---
 const RunningAppsIndicator = GObject.registerClass(
     class RunningAppsIndicator extends PanelMenu.Button {
         _init({ windowsTimeline, favoritesTimeline }) {
@@ -211,9 +213,10 @@ const RunningAppsIndicator = GObject.registerClass(
 );
 
 
-// --- AppMenuButton Class ---
+// --- AppMenuButton Class (変更なし) ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
+        // 【置換後の _init メソッド】
         _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
@@ -227,10 +230,8 @@ const AppMenuButton = GObject.registerClass(
             this._favoriteButtons = [];
             this._lastSelectedIndex = null;
             this._lastFocusedItem = null;
-
-            const initialFavorites = favoritesTimeline.at(Now);
-            this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
-
+            this._resetting = false;
+            // ★ メインクラスから渡されたTimelineの参照を保持
             this.toBeFocusedNewTimeline = toBeFocusedNewTimeline;
             this.toBeFocusedRemoveTimeline = toBeFocusedRemoveTimeline;
             this._windowsTimeline = windowsTimeline;
@@ -238,9 +239,7 @@ const AppMenuButton = GObject.registerClass(
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
             this._closeOnListCloseTimeline = closeOnListCloseTimeline;
-
             this._initializeMenuStructure();
-
             this._favoritesTimeline.map(favoriteAppIds => {
                 if (this._isDestroyed) return;
                 this._updateFavoritesSection(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
@@ -249,68 +248,21 @@ const AppMenuButton = GObject.registerClass(
                 if (this._isDestroyed) return;
                 this._updateFavoriteSelection(selectedIndex);
             });
-
             const windowSectionDataTimeline = combineLatestWith(
                 (windows, favs) => ({ windows, favs })
             )(this._windowsTimeline)(this._favoritesTimeline);
-
             windowSectionDataTimeline.map(({ windows, favs }) => {
                 if (this._isDestroyed) return;
                 this._updateWindowsSection(windows, favs);
+                // ★ UI更新後にフォーカスを適用
                 this._applyFocusIntent();
             });
         }
-
         open() {
             super.open();
             this.menu.actor.grab_key_focus();
         }
-
-        close() {
-            super.close();
-            this._selectedFavoriteIndexTimeline.define(Now, null);
-        }
-
-        _applyFocusIntent() {
-            const appToFocus = this.toBeFocusedNewTimeline.at(Now);
-            const indexToFocus = this.toBeFocusedRemoveTimeline.at(Now);
-
-            if (!appToFocus && indexToFocus === null) return;
-
-            this.toBeFocusedNewTimeline.define(Now, null);
-            this.toBeFocusedRemoveTimeline.define(Now, null);
-
-            if (appToFocus) {
-                const allWindowItems = this._windowsContainer.filter(item => item._itemType === 'window');
-                let targetWindowItem = null;
-                let latestTimestamp = -1;
-
-                for (const item of allWindowItems) {
-                    const [win, timestamp] = item._itemData;
-                    const itemApp = this._extension._windowModel._windowTracker.get_window_app(win);
-                    if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
-                        if (timestamp > latestTimestamp) {
-                            latestTimestamp = timestamp;
-                            targetWindowItem = item;
-                        }
-                    }
-                }
-                if (targetWindowItem) this.menu.set_active_item(targetWindowItem);
-
-            } else if (indexToFocus !== null && indexToFocus >= 0) {
-                const focusableItems = Array.from(this.menu).filter(item => item && item.reactive);
-                if (focusableItems.length > 0) {
-                    if (indexToFocus > 0) {
-                        const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
-                        this.menu.set_active_item(focusableItems[newFocusIndex]);
-                    } else {
-                        // If the first item was closed, focus the new first item.
-                        this.menu.set_active_item(focusableItems[0]);
-                    }
-                }
-            }
-        }
-
+        close() { super.close(); this._selectedFavoriteIndexTimeline.define(Now, null); }
         _flashIcon(color) {
             if (this._isDestroyed || !this._panelIcon || this._panelIcon.is_destroyed) return;
             const originalStyle = this._panelIcon.get_style();
@@ -331,7 +283,7 @@ const AppMenuButton = GObject.registerClass(
             this._favoriteButtons = [];
             this._lastSelectedIndex = null;
         }
-
+        // 【置換後の _handleFavLaunch メソッド】
         _handleFavLaunch() {
             this._flashIcon('blue');
             const selectedIndex = this._selectedFavoriteIndexTimeline.at(Now);
@@ -351,12 +303,28 @@ const AppMenuButton = GObject.registerClass(
                 }
             }
         }
-
+        _resetMenuState() {
+            if (this._resetting || this._isDestroyed) return;
+            this._resetting = true;
+            let handlerId = 0;
+            handlerId = this.menu.connect('open-state-changed', (menu, isOpen) => {
+                if (this._isDestroyed) { if (handlerId > 0) this.menu.disconnect(handlerId); return; }
+                if (!isOpen) {
+                    this.menu.open();
+                    if (this.menu.first_item) this.menu.set_active_item(this.menu.first_item);
+                    this.menu.actor.grab_key_focus();
+                    if (handlerId > 0) this.menu.disconnect(handlerId);
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => { this._resetting = false; return GLib.SOURCE_REMOVE; });
+                }
+            });
+            this.menu.close();
+        }
         _onMenuKeyPress(actor, event) {
             const symbol = event.get_key_symbol();
 
+            // ★ 新規追加: ショートカットキーでメニューを閉じる機能
             if (this._isMenuCloseShortcut(symbol, event)) {
-                this._flashIcon('purple');
+                this._flashIcon('purple'); // 閉じる動作を視覚的に示す
                 this.menu.close();
                 return Clutter.EVENT_STOP;
             }
@@ -379,14 +347,28 @@ const AppMenuButton = GObject.registerClass(
             return Clutter.EVENT_PROPAGATE;
         }
 
+        // ★ 新規メソッド: 現在押されたキーがメニューを閉じるショートカットキーかどうかを判定
         _isMenuCloseShortcut(symbol, event) {
+            // 設定からopen-popup-shortcutを取得
             const settings = this._extension.getSettings();
             const shortcutKeys = settings.get_strv('open-popup-shortcut');
-            if (!shortcutKeys || shortcutKeys.length === 0) return false;
+
+            if (!shortcutKeys || shortcutKeys.length === 0) {
+                return false;
+            }
+
+            // ショートカットキーの文字列をパース（例: "<Super>space"）
             const shortcutString = shortcutKeys[0];
             const parsedShortcut = this._parseShortcutString(shortcutString);
-            if (!parsedShortcut) return false;
+
+            if (!parsedShortcut) {
+                return false;
+            }
+
+            // 修飾キーの状態をチェック
             const modifierState = event.get_state();
+
+            // 各修飾キーが正しく押されているかチェック
             let modifiersMatch = true;
             for (const modifier of parsedShortcut.modifiers) {
                 if (!(modifierState & modifier)) {
@@ -394,69 +376,175 @@ const AppMenuButton = GObject.registerClass(
                     break;
                 }
             }
-            if (!modifiersMatch) return false;
+
+            if (!modifiersMatch) {
+                return false;
+            }
+
+            // キーシンボルが一致するかチェック
             return symbol === parsedShortcut.key;
         }
 
+        // ★ 新規メソッド: ショートカット文字列をパースして修飾キーとキーシンボルに分解
         _parseShortcutString(shortcutString) {
-            if (!shortcutString || shortcutString.trim() === '') return null;
+            if (!shortcutString || shortcutString.trim() === '') {
+                return null;
+            }
+
             const modifiers = [];
             let keyName = shortcutString;
-            if (shortcutString.includes('<Super>')) { modifiers.push(Clutter.ModifierType.SUPER_MASK); keyName = keyName.replace('<Super>', ''); }
-            if (shortcutString.includes('<Control>')) { modifiers.push(Clutter.ModifierType.CONTROL_MASK); keyName = keyName.replace('<Control>', ''); }
-            if (shortcutString.includes('<Alt>')) { modifiers.push(Clutter.ModifierType.MOD1_MASK); keyName = keyName.replace('<Alt>', ''); }
-            if (shortcutString.includes('<Shift>')) { modifiers.push(Clutter.ModifierType.SHIFT_MASK); keyName = keyName.replace('<Shift>', ''); }
+
+            // 修飾キーを抽出
+            if (shortcutString.includes('<Super>')) {
+                modifiers.push(Clutter.ModifierType.SUPER_MASK);
+                keyName = keyName.replace('<Super>', '');
+            }
+            if (shortcutString.includes('<Control>')) {
+                modifiers.push(Clutter.ModifierType.CONTROL_MASK);
+                keyName = keyName.replace('<Control>', '');
+            }
+            if (shortcutString.includes('<Alt>')) {
+                modifiers.push(Clutter.ModifierType.MOD1_MASK);
+                keyName = keyName.replace('<Alt>', '');
+            }
+            if (shortcutString.includes('<Shift>')) {
+                modifiers.push(Clutter.ModifierType.SHIFT_MASK);
+                keyName = keyName.replace('<Shift>', '');
+            }
+
+            // キー名をClutterのキーシンボルに変換
             let keySymbol;
             switch (keyName.toLowerCase()) {
-                case 'space': keySymbol = Clutter.KEY_space; break;
-                case 'tab': keySymbol = Clutter.KEY_Tab; break;
-                case 'return': case 'enter': keySymbol = Clutter.KEY_Return; break;
-                case 'escape': keySymbol = Clutter.KEY_Escape; break;
-                case 'f1': keySymbol = Clutter.KEY_F1; break; case 'f2': keySymbol = Clutter.KEY_F2; break;
-                case 'f3': keySymbol = Clutter.KEY_F3; break; case 'f4': keySymbol = Clutter.KEY_F4; break;
-                case 'f5': keySymbol = Clutter.KEY_F5; break; case 'f6': keySymbol = Clutter.KEY_F6; break;
-                case 'f7': keySymbol = Clutter.KEY_F7; break; case 'f8': keySymbol = Clutter.KEY_F8; break;
-                case 'f9': keySymbol = Clutter.KEY_F9; break; case 'f10': keySymbol = Clutter.KEY_F10; break;
-                case 'f11': keySymbol = Clutter.KEY_F11; break; case 'f12': keySymbol = Clutter.KEY_F12; break;
+                case 'space':
+                    keySymbol = Clutter.KEY_space;
+                    break;
+                case 'tab':
+                    keySymbol = Clutter.KEY_Tab;
+                    break;
+                case 'return':
+                case 'enter':
+                    keySymbol = Clutter.KEY_Return;
+                    break;
+                case 'escape':
+                    keySymbol = Clutter.KEY_Escape;
+                    break;
+                case 'f1': keySymbol = Clutter.KEY_F1; break;
+                case 'f2': keySymbol = Clutter.KEY_F2; break;
+                case 'f3': keySymbol = Clutter.KEY_F3; break;
+                case 'f4': keySymbol = Clutter.KEY_F4; break;
+                case 'f5': keySymbol = Clutter.KEY_F5; break;
+                case 'f6': keySymbol = Clutter.KEY_F6; break;
+                case 'f7': keySymbol = Clutter.KEY_F7; break;
+                case 'f8': keySymbol = Clutter.KEY_F8; break;
+                case 'f9': keySymbol = Clutter.KEY_F9; break;
+                case 'f10': keySymbol = Clutter.KEY_F10; break;
+                case 'f11': keySymbol = Clutter.KEY_F11; break;
+                case 'f12': keySymbol = Clutter.KEY_F12; break;
                 default:
+                    // 単一文字の場合
                     if (keyName.length === 1) {
                         const char = keyName.toLowerCase();
-                        if (char >= 'a' && char <= 'z') { keySymbol = Clutter.KEY_a + (char.charCodeAt(0) - 'a'.charCodeAt(0)); }
-                        else if (char >= '0' && char <= '9') { keySymbol = Clutter.KEY_0 + (char.charCodeAt(0) - '0'.charCodeAt(0)); }
+                        if (char >= 'a' && char <= 'z') {
+                            keySymbol = Clutter.KEY_a + (char.charCodeAt(0) - 'a'.charCodeAt(0));
+                        } else if (char >= '0' && char <= '9') {
+                            keySymbol = Clutter.KEY_0 + (char.charCodeAt(0) - '0'.charCodeAt(0));
+                        }
                     }
                     break;
             }
-            if (keySymbol === undefined) { console.warn(`Unknown key name: ${keyName}`); return null; }
-            return { modifiers: modifiers, key: keySymbol };
+
+            if (keySymbol === undefined) {
+                console.warn(`Unknown key name: ${keyName}`);
+                return null;
+            }
+
+            return {
+                modifiers: modifiers,
+                key: keySymbol
+            };
         }
 
+        // 【新規追加する _isAppLaunchable メソッド】
         _isAppLaunchable(app) {
-            if (!app) return false;
+            if (!app) {
+                return false;
+            }
             const appInfo = app.get_app_info();
-            return appInfo ? appInfo.should_show() : false;
+            if (!appInfo) {
+                return false;
+            }
+            return appInfo.should_show();
         }
 
+        /**
+         * アプリケーションの新規インスタンス起動プロセスを開始します。
+         * @param {Shell.App} app - 起動するアプリケーションオブジェクト。
+         */
+
+
+        // より簡潔な代替実装（Timelineを使わない場合）
         _launchNewInstance(app) {
-            if (this._isDestroyed) { console.warn("Attempted to launch on a destroyed instance."); return; }
+            if (this._isDestroyed) {
+                console.warn("Attempted to launch on a destroyed instance.");
+                return;
+            }
+
             const launchMethods = [
-                { name: 'request_new_window', execute: (app) => app.request_new_window(-1, null) },
                 {
-                    name: 'command_line', execute: (app) => {
+                    name: 'request_new_window',
+                    execute: (app) => app.request_new_window(-1, null)
+                },
+                // {  // Promiseを返す activate_action API を完全に除外
+                //     name: 'activate_action',
+                //     execute: (app) => app.activate_action('new-window', [], -1)
+                // },
+                {
+                    name: 'command_line',
+                    execute: (app) => {
                         const appId = app.get_id();
                         let command = null;
-                        if (appId === 'org.gnome.Nautilus.desktop') command = 'nautilus --new-window';
-                        else if (appId === 'org.gnome.Terminal.desktop') command = 'gnome-terminal --window';
-                        else if (appId === 'org.gnome.Console.desktop') command = 'kgx';
-                        if (command) { GLib.spawn_command_line_async(command); } else { throw new Error("No suitable command found"); }
+
+                        if (appId === 'org.gnome.Nautilus.desktop') {
+                            command = 'nautilus --new-window';
+                        } else if (appId === 'org.gnome.Terminal.desktop') {
+                            command = 'gnome-terminal --window';
+                        } else if (appId === 'org.gnome.Console.desktop') {
+                            command = 'kgx';
+                        }
+
+                        if (command) {
+                            GLib.spawn_command_line_async(command);
+                        } else {
+                            throw new Error("No suitable command found");
+                        }
                     }
                 },
-                { name: 'fallback_launch', execute: (app) => app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT) }
+                {
+                    name: 'fallback_launch',
+                    execute: (app) => app.launch(0, -1, Shell.AppLaunchGpu.DEFAULT)
+                }
             ];
+
             const tryNextMethod = (methodIndex) => {
-                if (methodIndex >= launchMethods.length) { console.error("💥 All launch methods failed"); Main.notify('Error launching application', `Could not launch ${app.get_name()}`); return; }
+                if (methodIndex >= launchMethods.length) {
+                    console.error("💥 All launch methods failed");
+                    Main.notify('Error launching application', `Could not launch ${app.get_name()}`);
+                    return;
+                }
+
                 const method = launchMethods[methodIndex];
-                try { method.execute(app); } catch (e) { setTimeout(() => tryNextMethod(methodIndex + 1), 10); }
+                console.log(`--- Attempting: ${method.name} ---`);
+
+                try {
+                    method.execute(app);
+                    console.log(`✅ ${method.name} succeeded`);
+                } catch (e) {
+                    console.warn(`❌ ${method.name} failed: ${e.message}`);
+                    // 次のメソッドを非同期で試行
+                    setTimeout(() => tryNextMethod(methodIndex + 1), 10);
+                }
             };
+
             tryNextMethod(0);
         }
 
@@ -466,7 +554,6 @@ const AppMenuButton = GObject.registerClass(
             if (newIndex !== null && this._favoriteButtons[newIndex]) this._favoriteButtons[newIndex].add_style_class_name('selected');
             this._lastSelectedIndex = newIndex;
         }
-
         _updateFavoritesSection(favoriteAppIds, selectedIndex) {
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
@@ -479,7 +566,10 @@ const AppMenuButton = GObject.registerClass(
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (!app) continue;
                     const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'favorite-bar-app-icon' }), style_class: 'favorite-button', can_focus: false, track_hover: true });
-                    button.connect('clicked', () => { this._selectedFavoriteIndexTimeline.define(Now, index); this._handleFavLaunch(); });
+                    button.connect('clicked', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                        this._handleFavLaunch();
+                    });
                     button.connect('enter-event', () => { this._selectedFavoriteIndexTimeline.define(Now, index); });
                     this._favoriteButtons[index] = button;
                     favoritesBox.add_child(button);
@@ -489,8 +579,8 @@ const AppMenuButton = GObject.registerClass(
                 this._updateFavoriteSelection(selectedIndex);
             }
         }
-
         _sortWindowGroups(windowGroups, favoriteAppIds) {
+            // _sortWindowGroups メソッドの中身をこれだけにします
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
 
@@ -531,9 +621,11 @@ const AppMenuButton = GObject.registerClass(
                     this.menu.addMenuItem(headerItem);
                     this._windowsContainer.push(headerItem);
 
+                    // ★ データ構造変更対応
                     const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => winA.get_frame_rect().y - winB.get_frame_rect().y);
                     for (const [metaWindow, timestamp] of sortedWindows) {
                         const windowItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true, style_class: 'window-list-item window-item' });
+                        // ★ データ構造変更対応: _itemDataにタプルを格納
                         windowItem._itemData = [metaWindow, timestamp];
                         windowItem._itemType = 'window';
                         const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'window-item-container' });
@@ -543,6 +635,7 @@ const AppMenuButton = GObject.registerClass(
                         const windowCloseButton = new St.Button({ style_class: 'window-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                         windowCloseButton.connect('clicked', () => windowItem.emit('custom-close'));
                         windowHbox.add_child(windowCloseButton);
+                        // ★ item引数にはmetaWindowオブジェクトを渡す
                         windowItem.connect('custom-activate', () => this._handleWindowActivate(windowItem, metaWindow, 'window'));
                         windowItem.connect('custom-close', () => this._handleWindowClose(windowItem, metaWindow, 'window'));
                         this.menu.addMenuItem(windowItem);
@@ -555,7 +648,6 @@ const AppMenuButton = GObject.registerClass(
                 this._windowsContainer.push(noWindowsItem);
             }
         }
-
         _handleWindowActivate(actor, item, itemType) {
             this._flashIcon('green');
             this._activateSelection(actor, item, itemType);
@@ -563,12 +655,12 @@ const AppMenuButton = GObject.registerClass(
                 this.menu.close();
             }
         }
-
+        // 【置換後の _handleWindowClose メソッド】
         _handleWindowClose(actor, item, itemType) {
             this._flashIcon('red');
 
             this.toBeFocusedNewTimeline.define(Now, null);
-            const focusableItems = Array.from(this.menu).filter(i => i && i.reactive);
+            const focusableItems = this.menu.items.filter(i => i.reactive);
             const itemIndex = focusableItems.indexOf(actor);
             this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
 
@@ -577,19 +669,20 @@ const AppMenuButton = GObject.registerClass(
                 this.menu.close();
             }
         }
-
         _closeSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
             if (itemType === 'group') {
+                // ★ データ構造変更対応: 分割代入でウィンドウオブジェクトのみ使用
                 item.windows.forEach(([win, ts]) => win.delete(global.get_current_time()));
             }
             else {
                 item.delete(global.get_current_time());
             }
         }
-
         _activateSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
+            // ★ データ構造変更対応: グループの場合は最初のウィンドウオブジェクトを、
+            // 単一ウィンドウの場合はitem自体を使用
             const windowToActivate = (itemType === 'group') ? item.windows[0][0] : item;
             if (windowToActivate) {
                 Main.activateWindow(windowToActivate);
@@ -614,6 +707,9 @@ const DateTimeClockManager = GObject.registerClass(
         }
 
         manage(positionTimeline, rankTimeline) {
+            // Stop any previous management
+
+
             const combinedTimeline = combineLatestWith(
                 (pos, rank) => ({ pos, rank })
             )(positionTimeline)(rankTimeline);
@@ -658,11 +754,14 @@ const DateTimeClockManager = GObject.registerClass(
         }
 
         destroy() {
+
+            // Restore the clock to its original place
+            //Will crush Gnome, so do notihng
         }
     }
 );
 
-// ★ メインクラス
+// ★ メインクラス (DateTime Clock管理機能を追加)
 export default class MinimalTimelineExtension extends Extension {
     constructor(metadata) {
         super(metadata);
@@ -695,11 +794,13 @@ export default class MinimalTimelineExtension extends Extension {
         }
     }
 
+    // 【置換後の enable メソッド】
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
         const settings = this.getSettings();
 
+        // ★ 仕様書v3.0: 状態の所有者をメインクラスにする
         this._windowTimestamps = new Map();
         this.toBeFocusedNewTimeline = Timeline(null);
         this.toBeFocusedRemoveTimeline = Timeline(null);
@@ -731,6 +832,7 @@ export default class MinimalTimelineExtension extends Extension {
                     Main.wm.addKeybinding(`shortcut-${i}`, settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onFavoriteShortcut.bind(this, i));
                 }
 
+                // ★ 仕様書v3.0: 辞書への参照を渡してWindowModelを生成
                 this._windowModel = new WindowModel({
                     windowTimestamps: this._windowTimestamps
                 });
@@ -756,6 +858,7 @@ export default class MinimalTimelineExtension extends Extension {
                     const closeOnListActivateTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-activate');
                     const closeOnListCloseTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-close');
 
+                    // ★ 仕様書v3.0: 関連する全てのTimelineをAppMenuButtonに渡す
                     this._appMenuButton = new AppMenuButton({
                         windowsTimeline: this._windowModel.windowsTimeline,
                         favoritesTimeline: favoritesTimeline,
