@@ -277,11 +277,12 @@ const AppMenuButton = GObject.registerClass(
 
             if (!appToFocus && indexToFocus === null) return;
 
+            // 意図を一度実行したらリセットする
             this.toBeFocusedNewTimeline.define(Now, null);
             this.toBeFocusedRemoveTimeline.define(Now, null);
 
             if (appToFocus) {
-                const allWindowItems = this._windowsContainer.filter(item => item._itemType === 'window');
+                const allWindowItems = this._windowsContainer.filter(item => item && item._itemType === 'window');
                 let targetWindowItem = null;
                 let latestTimestamp = -1;
 
@@ -295,17 +296,19 @@ const AppMenuButton = GObject.registerClass(
                         }
                     }
                 }
-                if (targetWindowItem) this.menu.set_active_item(targetWindowItem);
+                // ★★★ BUG FIX: Correct way to set focus is assigning to the `active_item` property.
+                if (targetWindowItem) this.menu.active_item = targetWindowItem;
 
             } else if (indexToFocus !== null && indexToFocus >= 0) {
                 const focusableItems = Array.from(this.menu).filter(item => item && item.reactive);
                 if (focusableItems.length > 0) {
                     if (indexToFocus > 0) {
                         const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
-                        this.menu.set_active_item(focusableItems[newFocusIndex]);
+                        // ★★★ BUG FIX: Correct way to set focus.
+                        this.menu.active_item = focusableItems[newFocusIndex];
                     } else {
-                        // If the first item was closed, focus the new first item.
-                        this.menu.set_active_item(focusableItems[0]);
+                        // ★★★ BUG FIX: Correct way to set focus.
+                        this.menu.active_item = focusableItems[0];
                     }
                 }
             }
