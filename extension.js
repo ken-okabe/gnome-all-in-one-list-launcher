@@ -60,13 +60,7 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
 }, class NonClosingPopupBaseMenuItem extends PopupMenu.PopupBaseMenuItem {
     // _init で extension インスタンスを受け取るように修正（前回の回答通り）
     _init(params) {
-        // paramsオブジェクトからextensionプロパティを分割代入で取り出す
-        const { extension, ...rest } = params;
-        // 残りのプロパティ(rest)を親クラスのコンストラクタに渡す
-        super._init(rest);
-
-        // 取り出したextensionインスタンスを内部に保存
-        this._extension = extension;
+        super._init(params); // 親クラスにそのままパラメータを渡す
 
         this.activate = (event) => {
             this.emit('custom-activate');
@@ -483,7 +477,6 @@ const AppMenuButton = GObject.registerClass(
                 const sortedGroups = this._sortWindowGroups([...windowGroups], favoriteAppIds);
                 for (const group of sortedGroups) {
                     const headerItem = new NonClosingPopupBaseMenuItem({
-                        extension: this._extension,
                         reactive: true,
                         can_focus: true,
                         style_class: 'window-list-item app-header-item'
@@ -515,7 +508,6 @@ const AppMenuButton = GObject.registerClass(
                     const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => winA.get_frame_rect().y - winB.get_frame_rect().y);
                     for (const [metaWindow, timestamp] of sortedWindows) {
                         const windowItem = new NonClosingPopupBaseMenuItem({
-                            extension: this._extension,
                             reactive: true,
                             can_focus: true,
                             style_class: 'window-list-item window-item'
