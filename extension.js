@@ -237,14 +237,14 @@ const RunningAppsIndicator = GObject.registerClass(
         }
     }
 );
-
-
 // --- AppMenuButton Class ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
         _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
+
+            // プロパティの初期化を bind の前に移動
             this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
             this.add_child(this._panelIcon);
             this._extension = extension;
@@ -256,17 +256,46 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedIndex = null;
             this._lastFocusedItem = null;
 
-            const initialFavorites = favoritesTimeline.at(Now);
-            this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
-
+            // bind内で使用されるプロパティを先に設定する
+            this._windowsTimeline = windowsTimeline;
+            this._favoritesTimeline = favoritesTimeline;
             this.toBeFocusedNewTimeline = toBeFocusedNewTimeline;
             this.toBeFocusedRemoveTimeline = toBeFocusedRemoveTimeline;
             this.redrawTimeline = redrawTimeline;
-            this._windowsTimeline = windowsTimeline;
-            this._favoritesTimeline = favoritesTimeline;
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
             this._closeOnListCloseTimeline = closeOnListCloseTimeline;
+
+            // ★★★ 修正点1: マップの役割変更 ★★★
+            // ウィンドウアイテムとその中のラベルへの直接参照を保持するマップ
+            this._windowItemsMap = new Map();
+            this._windowTitleConnections = new Map();
+
+            // windowsTimelineの構造変化にbindして、タイトル監視のライフサイクルを管理する
+            this._lifecycleManager = windowsTimeline.bind(windowGroups => {
+                for (const [win, id] of this._windowTitleConnections) {
+                    try {
+                        if (win && !win.is_destroyed) win.disconnect(id);
+                    } catch (e) { /* ignore */ }
+                }
+                this._windowTitleConnections.clear();
+
+                const allWindows = windowGroups.flatMap(g => g.windows.map(([win, ts]) => win));
+
+                for (const metaWindow of allWindows) {
+                    const connectionId = metaWindow.connect('notify::title', () => {
+                        this._updateSingleWindowTitle(metaWindow);
+                    });
+                    this._windowTitleConnections.set(metaWindow, connectionId);
+                }
+
+                this._updateWindowsUnit(windowGroups, this._favoritesTimeline.at(Now));
+
+                return Timeline(true);
+            });
+
+            const initialFavorites = favoritesTimeline.at(Now);
+            this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
 
             this._initializeMenuStructure();
 
@@ -274,19 +303,35 @@ const AppMenuButton = GObject.registerClass(
                 if (this._isDestroyed) return;
                 this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
             });
+
             this._selectedFavoriteIndexTimeline.map(selectedIndex => {
                 if (this._isDestroyed) return;
                 this._updateFavoriteSelection(selectedIndex);
             });
+        }
 
-            const windowUnitDataTimeline = combineLatestWith(
-                (windows, favs) => ({ windows, favs })
-            )(this._windowsTimeline)(this._favoritesTimeline);
+        /**
+         * 特定のウィンドウアイテムのタイトル表示だけを更新する。
+         * @param {Meta.Window} metaWindow - タイトルが変更されたウィンドウ
+         */
+        _updateSingleWindowTitle(metaWindow) {
+            // ★★★ 修正点2: 堅牢な更新ロジックとデバッグログ ★★★
+            try {
+                const windowId = metaWindow.get_stable_sequence();
+                console.log(`[TitleUpdate] Received update for window: ${metaWindow.get_title()} (ID: ${windowId})`);
 
-            windowUnitDataTimeline.map(({ windows, favs }) => {
-                if (this._isDestroyed) return;
-                this._updateWindowsUnit(windows, favs);
-            });
+                const refs = this._windowItemsMap.get(windowId);
+
+                if (refs && refs.label && !refs.label.is_destroyed) {
+                    const newTitle = metaWindow.get_title() || '...';
+                    console.log(`[TitleUpdate] Found label. Setting text to: "${newTitle}"`);
+                    refs.label.set_text(newTitle);
+                } else {
+                    console.warn(`[TitleUpdate] Could not find label reference for window ID: ${windowId}`);
+                }
+            } catch (e) {
+                console.error(`[TitleUpdate] Error during title update: ${e}`);
+            }
         }
 
         open() {
@@ -308,6 +353,7 @@ const AppMenuButton = GObject.registerClass(
                 return GLib.SOURCE_REMOVE;
             });
         }
+
         _initializeMenuStructure() {
             if (this._isDestroyed) return;
             this.menu.removeAll();
@@ -342,20 +388,14 @@ const AppMenuButton = GObject.registerClass(
         }
 
         _onMenuKeyPress(actor, event) {
-
-            this._extension.recoverFocusTimeline.define(Now, true); // 値はなんでも良い。トリガーが目的。
-
+            this._extension.recoverFocusTimeline.define(Now, true);
             console.log(`[FocusDebug] recoverFocusTimeline triggered by key press BECAUSE possible focus recovery`);
-
-
             const symbol = event.get_key_symbol();
-
             if (this._isMenuCloseShortcut(symbol, event)) {
                 this._flashIcon('purple');
                 this.menu.close();
                 return Clutter.EVENT_STOP;
             }
-
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
                 this._flashIcon('orange');
                 const favs = this._extension._favsSettings.get_strv('favorite-apps');
@@ -506,15 +546,21 @@ const AppMenuButton = GObject.registerClass(
         _sortWindowGroups(windowGroups, favoriteAppIds) {
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
-        // AppMenuButton クラス内のメソッド
+
         _updateWindowsUnit(windowGroups, favoriteAppIds) {
+            this._windowItemsMap.clear();
             this._windowsContainer.forEach(child => child.destroy());
             this._windowsContainer = [];
             this._separatorItem?.destroy();
             this._separatorItem = null;
+
             if (this._favoritesContainer && windowGroups && windowGroups.length > 0) {
                 this._separatorItem = new PopupMenu.PopupSeparatorMenuItem();
-                this.menu.addMenuItem(this._separatorItem);
+                if (this.menu.box.contains(this._favoritesContainer.actor)) {
+                    this.menu.addMenuItem(this._separatorItem, this.menu.box.get_children().indexOf(this._favoritesContainer.actor) + 1);
+                } else {
+                    this.menu.addMenuItem(this._separatorItem);
+                }
             }
             if (windowGroups && windowGroups.length > 0) {
                 const sortedGroups = this._sortWindowGroups([...windowGroups], favoriteAppIds);
@@ -548,17 +594,11 @@ const AppMenuButton = GObject.registerClass(
                     this.menu.addMenuItem(headerItem);
                     this._windowsContainer.push(headerItem);
 
-                    // ★★★ ここからが修正箇所 ★★★
                     const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => {
                         const yDiff = winA.get_frame_rect().y - winB.get_frame_rect().y;
-                        // Y座標が異なる場合は、その差でソート
-                        if (yDiff !== 0) {
-                            return yDiff;
-                        }
-                        // Y座標が同じ場合は、タイムスタンプでソート（昇順）
+                        if (yDiff !== 0) return yDiff;
                         return tsA - tsB;
                     });
-                    // ★★★ 修正ここまで ★★★
 
                     for (const [metaWindow, timestamp] of sortedWindows) {
                         const windowItem = new NonClosingPopupBaseMenuItem({
@@ -570,7 +610,11 @@ const AppMenuButton = GObject.registerClass(
                         windowItem._itemType = 'window';
                         const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'window-item-container' });
                         windowItem.add_child(windowHbox);
-                        windowHbox.add_child(new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER, style_class: 'window-item-title' }));
+
+                        // ★★★ 修正点3: ラベルへの参照を保持 ★★★
+                        const titleLabel = new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER, style_class: 'window-item-title' });
+                        windowHbox.add_child(titleLabel);
+
                         windowHbox.add_child(new St.Widget({ x_expand: true }));
                         const windowCloseButton = new St.Button({ style_class: 'window-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                         windowCloseButton.connect('clicked', () => windowItem.emit('custom-close'));
@@ -579,6 +623,10 @@ const AppMenuButton = GObject.registerClass(
                         windowItem.connect('custom-close', () => this._handleWindowClose(windowItem, metaWindow, 'window'));
                         this.menu.addMenuItem(windowItem);
                         this._windowsContainer.push(windowItem);
+
+                        const windowId = metaWindow.get_stable_sequence();
+                        // マップには、アイテム本体とラベルへの直接参照を保存する
+                        this._windowItemsMap.set(windowId, { item: windowItem, label: titleLabel });
                     }
                 }
             } else {
@@ -591,7 +639,6 @@ const AppMenuButton = GObject.registerClass(
                 if (this.redrawTimeline) {
                     this.redrawTimeline.define(Now, true);
                 }
-
                 return GLib.SOURCE_REMOVE;
             });
         }
@@ -606,20 +653,12 @@ const AppMenuButton = GObject.registerClass(
 
         _handleWindowClose(actor, item, itemType) {
             this._flashIcon('red');
-
             this.toBeFocusedNewTimeline.define(Now, null);
-
-            // ★★★ ここからが修正箇所 ★★★
-            // 正しい方法でメニューから全てのアイテムを取得する
             const allItems = this.menu._getMenuItems();
-            // その中からフォーカス可能な（reactiveな）アイテムだけをフィルタリング
             const focusableItems = allItems.filter(i => i && i.reactive);
-            // ★★★ 修正ここまで ★★★
-
             const itemIndex = focusableItems.indexOf(actor);
             console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`);
             this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
-
             this._closeSelection(actor, item, itemType);
             if (this._closeOnListCloseTimeline.at(Now)) {
                 this.menu.close();
@@ -638,17 +677,27 @@ const AppMenuButton = GObject.registerClass(
 
         _activateSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
-
             if (itemType === 'group') {
-                // item.windows配列のすべてのウィンドウをループでアクティブ化する
                 item.windows.forEach(([win, ts]) => Main.activateWindow(win));
             } else {
-                // グループでない場合は、単一のウィンドウをアクティブ化する
                 Main.activateWindow(item);
             }
         }
 
-        destroy() { if (this._isDestroyed) return; this._isDestroyed = true; super.destroy(); }
+        destroy() {
+            if (this._isDestroyed) return;
+            this._isDestroyed = true;
+
+            for (const [win, id] of this._windowTitleConnections) {
+                try {
+                    if (win && !win.is_destroyed) win.disconnect(id);
+                } catch (e) { /* ignore */ }
+            }
+            this._windowTitleConnections.clear();
+            this._windowItemsMap.clear();
+
+            super.destroy();
+        }
     }
 );
 // ★ DateTime Clock Position Manager Class
