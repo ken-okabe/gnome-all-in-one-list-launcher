@@ -617,11 +617,16 @@ const AppMenuButton = GObject.registerClass(
 
         _activateSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
-            const windowToActivate = (itemType === 'group') ? item.windows[0][0] : item;
-            if (windowToActivate) {
-                Main.activateWindow(windowToActivate);
+
+            if (itemType === 'group') {
+                // item.windows配列のすべてのウィンドウをループでアクティブ化する
+                item.windows.forEach(([win, ts]) => Main.activateWindow(win));
+            } else {
+                // グループでない場合は、単一のウィンドウをアクティブ化する
+                Main.activateWindow(item);
             }
         }
+
         destroy() { if (this._isDestroyed) return; this._isDestroyed = true; super.destroy(); }
     }
 );
