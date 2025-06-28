@@ -117,8 +117,12 @@ const WindowModel = GObject.registerClass(
                 const a = this._windowTracker.get_window_app(w);
                 if (!a) continue;
 
-                const s = w.connect('notify::title', () => this.update());
-                this._signalIds.set(w, s);
+                // 'notify::title' に加えて 'position-changed' も監視する
+                const titleId = w.connect('notify::title', () => this.update());
+                const posId = w.connect('position-changed', () => this.update()); // ★ この行を追加
+
+                // 複数のシグナルIDを配列で保存する
+                this._signalIds.set(w, [titleId, posId]);
 
                 if (!this._windowTimestamps.has(windowId)) {
                     this._windowTimestamps.set(windowId, Date.now());
@@ -143,7 +147,12 @@ const WindowModel = GObject.registerClass(
 
         _disconnectWindowSignals() {
             for (const [w, i] of this._signalIds) {
-                try { if (w && !w.is_destroyed) w.disconnect(i); } catch (e) { }
+
+                // 配列に格納された各シグナルIDをループで解除する
+                for (const id of i) {
+                    try { if (w && !w.is_destroyed) w.disconnect(id); } catch (e) { }
+                }
+
             }
             this._signalIds.clear();
         }
