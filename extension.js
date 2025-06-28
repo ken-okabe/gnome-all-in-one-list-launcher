@@ -256,20 +256,20 @@ const AppMenuButton = GObject.registerClass(
 
             this._favoritesTimeline.map(favoriteAppIds => {
                 if (this._isDestroyed) return;
-                this._updateFavoritesSection(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
+                this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
             });
             this._selectedFavoriteIndexTimeline.map(selectedIndex => {
                 if (this._isDestroyed) return;
                 this._updateFavoriteSelection(selectedIndex);
             });
 
-            const windowSectionDataTimeline = combineLatestWith(
+            const windowUnitDataTimeline = combineLatestWith(
                 (windows, favs) => ({ windows, favs })
             )(this._windowsTimeline)(this._favoritesTimeline);
 
-            windowSectionDataTimeline.map(({ windows, favs }) => {
+            windowUnitDataTimeline.map(({ windows, favs }) => {
                 if (this._isDestroyed) return;
-                this._updateWindowsSection(windows, favs);
+                this._updateWindowsUnit(windows, favs);
             });
         }
 
@@ -464,7 +464,7 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedIndex = newIndex;
         }
 
-        _updateFavoritesSection(favoriteAppIds, selectedIndex) {
+        _updateFavoritesUnit(favoriteAppIds, selectedIndex) {
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
             this._favoriteButtons = [];
@@ -491,7 +491,7 @@ const AppMenuButton = GObject.registerClass(
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
 
-        _updateWindowsSection(windowGroups, favoriteAppIds) {
+        _updateWindowsUnit(windowGroups, favoriteAppIds) {
             this._windowsContainer.forEach(child => child.destroy());
             this._windowsContainer = [];
             this._separatorItem?.destroy();
