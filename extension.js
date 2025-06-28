@@ -14,6 +14,407 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Timeline, Now, combineLatestWith } from './timeline.js';
 
+// --- Robust Tooltip System for GNOME Shell Extensions ---
+
+// Singleton tooltip manager to prevent multiple tooltips
+class TooltipManager {
+    constructor() {
+        this._currentTooltip = null;
+        this._pendingTimeouts = new Set();
+    }
+
+    static getInstance() {
+        if (!this._instance) {
+            this._instance = new TooltipManager();
+        }
+        return this._instance;
+    }
+
+    showTooltip(text, sourceActor, options = {}) {
+        // Hide any existing tooltip first
+        this.hideCurrentTooltip();
+
+        try {
+            this._currentTooltip = new ImprovedTooltip();
+            this._currentTooltip.show(text, sourceActor, options);
+        } catch (error) {
+            log(`Tooltip error: ${error.message}`);
+            this._currentTooltip = null;
+        }
+    }
+
+    hideCurrentTooltip() {
+        if (this._currentTooltip) {
+            this._currentTooltip.hide();
+            this._currentTooltip = null;
+        }
+    }
+
+    addTimeout(timeoutId) {
+        this._pendingTimeouts.add(timeoutId);
+    }
+
+    removeTimeout(timeoutId) {
+        if (timeoutId && this._pendingTimeouts.has(timeoutId)) {
+            GLib.source_remove(timeoutId);
+            this._pendingTimeouts.delete(timeoutId);
+        }
+    }
+
+    cleanup() {
+        this.hideCurrentTooltip();
+        // Clear all pending timeouts
+        for (const timeoutId of this._pendingTimeouts) {
+            GLib.source_remove(timeoutId);
+        }
+        this._pendingTimeouts.clear();
+    }
+
+    static destroy() {
+        if (this._instance) {
+            this._instance.cleanup();
+            this._instance = null;
+        }
+    }
+}
+
+// Improved tooltip widget
+const ImprovedTooltip = GObject.registerClass(
+    class ImprovedTooltip extends St.Label {
+        _init() {
+            super._init({
+                style_class: 'tooltip-label',
+                reactive: false,
+                can_focus: false,
+                track_hover: false,
+                visible: false,
+                opacity: 0
+            });
+
+            // Apply CSS styling
+            this._applyStyle();
+
+            this._isShowing = false;
+            this._isHiding = false;
+            this._animationTimeout = null;
+
+            // Add to UI group with proper error handling
+            try {
+                Main.uiGroup.add_child(this);
+            } catch (error) {
+                log(`Failed to add tooltip to UI group: ${error.message}`);
+                this.destroy();
+                throw error;
+            }
+        }
+
+        _applyStyle() {
+            const style = [
+                'background-color: rgba(40, 40, 40, 0.95);',
+                'color: #ffffff;',
+                'border: 1px solid rgba(255, 255, 255, 0.1);',
+                'border-radius: 6px;',
+                'padding: 8px 12px;',
+                'font-size: 13px;',
+                'font-weight: 400;',
+                'box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);',
+                'max-width: 300px;'
+            ].join(' ');
+
+            this.set_style(style);
+        }
+
+        show(text, sourceActor, options = {}) {
+            if (this._isShowing || this._isHiding) {
+                return;
+            }
+
+            this._isShowing = true;
+
+            const {
+                delay = 300,
+                position = 'auto',
+                offset = 8
+            } = options;
+
+            // Validate inputs
+            if (!text || typeof text !== 'string') {
+                this._isShowing = false;
+                return;
+            }
+
+            if (!sourceActor || !sourceActor.get_stage) {
+                this._isShowing = false;
+                return;
+            }
+
+            this.set_text(text);
+            this._positionTooltip(sourceActor, position, offset);
+
+            // Show with animation
+            this.visible = true;
+            this.ease({
+                opacity: 255,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                onComplete: () => {
+                    this._isShowing = false;
+                }
+            });
+        }
+
+        _positionTooltip(sourceActor, position, offset) {
+            // Force layout to get accurate dimensions
+            this.get_theme_node().get_content_box(this.get_allocation_box());
+
+            const [stageX, stageY] = sourceActor.get_transformed_position();
+            const [actorWidth, actorHeight] = sourceActor.get_size();
+            const [tooltipWidth, tooltipHeight] = this.get_size();
+
+            const stageWidth = global.stage.width;
+            const stageHeight = global.stage.height;
+
+            let x, y;
+
+            // Determine optimal position
+            const actualPosition = this._determinePosition(
+                position, stageX, stageY, actorWidth, actorHeight,
+                tooltipWidth, tooltipHeight, stageWidth, stageHeight
+            );
+
+            switch (actualPosition) {
+                case 'top':
+                    x = stageX + (actorWidth - tooltipWidth) / 2;
+                    y = stageY - tooltipHeight - offset;
+                    break;
+                case 'bottom':
+                    x = stageX + (actorWidth - tooltipWidth) / 2;
+                    y = stageY + actorHeight + offset;
+                    break;
+                case 'left':
+                    x = stageX - tooltipWidth - offset;
+                    y = stageY + (actorHeight - tooltipHeight) / 2;
+                    break;
+                case 'right':
+                    x = stageX + actorWidth + offset;
+                    y = stageY + (actorHeight - tooltipHeight) / 2;
+                    break;
+                default: // fallback to bottom
+                    x = stageX + (actorWidth - tooltipWidth) / 2;
+                    y = stageY + actorHeight + offset;
+            }
+
+            // Constrain to screen bounds
+            x = Math.max(4, Math.min(x, stageWidth - tooltipWidth - 4));
+            y = Math.max(4, Math.min(y, stageHeight - tooltipHeight - 4));
+
+            this.set_position(Math.round(x), Math.round(y));
+        }
+
+        _determinePosition(preferredPosition, stageX, stageY, actorWidth, actorHeight,
+            tooltipWidth, tooltipHeight, stageWidth, stageHeight) {
+
+            if (preferredPosition !== 'auto') {
+                return preferredPosition;
+            }
+
+            // Check if actor is in top panel
+            const isInTopPanel = stageY < 50; // Approximate panel height
+
+            // For top panel, prefer bottom position
+            if (isInTopPanel) {
+                return 'bottom';
+            }
+
+            // For other cases, check available space
+            const spaceTop = stageY;
+            const spaceBottom = stageHeight - (stageY + actorHeight);
+            const spaceLeft = stageX;
+            const spaceRight = stageWidth - (stageX + actorWidth);
+
+            // Prefer top if there's enough space, otherwise bottom
+            if (spaceTop >= tooltipHeight + 8) {
+                return 'top';
+            } else if (spaceBottom >= tooltipHeight + 8) {
+                return 'bottom';
+            } else if (spaceRight >= tooltipWidth + 8) {
+                return 'right';
+            } else if (spaceLeft >= tooltipWidth + 8) {
+                return 'left';
+            }
+
+            return 'bottom'; // Fallback
+        }
+
+        hide() {
+            if (this._isHiding || !this.visible) {
+                return;
+            }
+
+            this._isHiding = true;
+            this._isShowing = false;
+
+            // Clear any pending animation
+            this.remove_all_transitions();
+
+            this.ease({
+                opacity: 0,
+                duration: 150,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                onComplete: () => {
+                    this.visible = false;
+                    this._isHiding = false;
+                    // Auto-destroy after hiding
+                    GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                        this.destroy();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
+            });
+        }
+
+        destroy() {
+            // Clear any pending timeouts
+            if (this._animationTimeout) {
+                GLib.source_remove(this._animationTimeout);
+                this._animationTimeout = null;
+            }
+
+            // Stop all animations
+            this.remove_all_transitions();
+
+            // Remove from parent
+            const parent = this.get_parent();
+            if (parent) {
+                parent.remove_child(this);
+            }
+
+            super.destroy();
+        }
+    }
+);
+
+// Enhanced tooltip helper function
+function addTooltip(actor, text, options = {}) {
+    // Validate inputs
+    if (!actor || !text) {
+        log('addTooltip: Invalid actor or text provided');
+        return null;
+    }
+
+    const {
+        delay = 500,
+        position = 'auto',
+        offset = 8
+    } = options;
+
+    let showTimeout = null;
+    let isHovering = false;
+    const tooltipManager = TooltipManager.getInstance();
+
+    // Clean up any existing tooltip handlers
+    if (actor._tooltipCleanup) {
+        actor._tooltipCleanup();
+    }
+
+    const enterHandler = actor.connect('enter-event', () => {
+        if (isHovering) return;
+        isHovering = true;
+
+        // Clear any existing timeout
+        if (showTimeout) {
+            tooltipManager.removeTimeout(showTimeout);
+            showTimeout = null;
+        }
+
+        showTimeout = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            if (isHovering && actor.get_stage()) {
+                try {
+                    tooltipManager.showTooltip(text, actor, { position, offset });
+                } catch (error) {
+                    log(`Tooltip show error: ${error.message}`);
+                }
+            }
+            showTimeout = null;
+            return GLib.SOURCE_REMOVE;
+        });
+
+        tooltipManager.addTimeout(showTimeout);
+    });
+
+    const leaveHandler = actor.connect('leave-event', () => {
+        if (!isHovering) return;
+        isHovering = false;
+
+        // Clear show timeout
+        if (showTimeout) {
+            tooltipManager.removeTimeout(showTimeout);
+            showTimeout = null;
+        }
+
+        // Hide current tooltip
+        tooltipManager.hideCurrentTooltip();
+    });
+
+    // Cleanup function
+    actor._tooltipCleanup = () => {
+        isHovering = false;
+
+        // Clear timeout
+        if (showTimeout) {
+            tooltipManager.removeTimeout(showTimeout);
+            showTimeout = null;
+        }
+
+        // Disconnect handlers safely
+        try {
+            if (enterHandler) actor.disconnect(enterHandler);
+            if (leaveHandler) actor.disconnect(leaveHandler);
+        } catch (error) {
+            // Actor might be destroyed already
+        }
+
+        // Hide tooltip
+        tooltipManager.hideCurrentTooltip();
+
+        // Remove cleanup reference
+        delete actor._tooltipCleanup;
+    };
+
+    // Return cleanup function for manual cleanup if needed
+    return actor._tooltipCleanup;
+}
+
+// Utility function to clean up all tooltips (call this when extension is disabled)
+function cleanupAllTooltips() {
+    TooltipManager.destroy();
+}
+
+// Export functions for use in extensions
+var tooltip = {
+    addTooltip,
+    cleanupAllTooltips,
+    TooltipManager
+};
+
+// Usage example:
+/*
+// Add tooltip to an actor
+const cleanup = addTooltip(myActor, "This is a tooltip", {
+    delay: 300,
+    position: 'top',
+    offset: 10
+});
+
+// Manual cleanup if needed
+if (cleanup) cleanup();
+
+// Clean up all tooltips when extension is disabled
+cleanupAllTooltips();
+*/
+
+
+
 // =====================================================================
 // === グローバルヘルパー関数 (Global Helper Function) ===
 // =====================================================================
@@ -151,7 +552,7 @@ const WindowModel = GObject.registerClass(
             }
             this._signalIds.clear();
         }
-        
+
         destroy() {
             if (this._restackedId) {
                 global.display.disconnect(this._restackedId);
@@ -195,6 +596,9 @@ const RunningAppsIconList = GObject.registerClass(
                     const icon = new St.Icon({ gicon: app.get_icon(), style_class: 'panel-window-icon' });
                     const button = new St.Button({ child: icon, style_class: 'panel-button' });
                     button.connect('clicked', () => Main.activateWindow(win));
+
+                    addTooltip(button, app.get_name()); // この行を追加
+
                     this.add_child(button);
                 }
             }
@@ -526,6 +930,9 @@ const AppMenuButton = GObject.registerClass(
                     const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'favorite-bar-app-icon' }), style_class: 'favorite-button', can_focus: false, track_hover: true });
                     button.connect('clicked', () => { this._selectedFavoriteIndexTimeline.define(Now, index); this._handleFavLaunch(); });
                     button.connect('enter-event', () => { this._selectedFavoriteIndexTimeline.define(Now, index); });
+
+                    addTooltip(button, app.get_name()); // この行を追加
+
                     this._favoriteButtons[index] = button;
                     favoritesBox.add_child(button);
                 }
