@@ -186,9 +186,17 @@ const RunningAppsIconList = GObject.registerClass(
             _sortUsingCommonRules(windowGroups, favoriteAppIds, getAppIdForGroup);
 
             for (const group of windowGroups) {
+                // ★★★ ここからが修正箇所 ★★★
                 const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => {
-                    return winA.get_frame_rect().x - winB.get_frame_rect().x;
+                    const xDiff = winA.get_frame_rect().x - winB.get_frame_rect().x;
+                    // X座標が異なる場合は、その差でソート
+                    if (xDiff !== 0) {
+                        return xDiff;
+                    }
+                    // X座標が同じ場合は、タイムスタンプでソート（昇順）
+                    return tsA - tsB;
                 });
+                // ★★★ 修正ここまで ★★★
 
                 for (const [win, timestamp] of sortedWindows) {
                     const app = this._windowTracker.get_window_app(win);
@@ -498,7 +506,7 @@ const AppMenuButton = GObject.registerClass(
         _sortWindowGroups(windowGroups, favoriteAppIds) {
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
-
+        // AppMenuButton クラス内のメソッド
         _updateWindowsUnit(windowGroups, favoriteAppIds) {
             this._windowsContainer.forEach(child => child.destroy());
             this._windowsContainer = [];
@@ -540,7 +548,18 @@ const AppMenuButton = GObject.registerClass(
                     this.menu.addMenuItem(headerItem);
                     this._windowsContainer.push(headerItem);
 
-                    const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => winA.get_frame_rect().y - winB.get_frame_rect().y);
+                    // ★★★ ここからが修正箇所 ★★★
+                    const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => {
+                        const yDiff = winA.get_frame_rect().y - winB.get_frame_rect().y;
+                        // Y座標が異なる場合は、その差でソート
+                        if (yDiff !== 0) {
+                            return yDiff;
+                        }
+                        // Y座標が同じ場合は、タイムスタンプでソート（昇順）
+                        return tsA - tsB;
+                    });
+                    // ★★★ 修正ここまで ★★★
+
                     for (const [metaWindow, timestamp] of sortedWindows) {
                         const windowItem = new NonClosingPopupBaseMenuItem({
                             reactive: true,
@@ -568,19 +587,13 @@ const AppMenuButton = GObject.registerClass(
                 this._windowsContainer.push(noWindowsItem);
             }
 
-            // ★★★ ここからが追加するコード ★★★
-            // UIの更新処理が完了し、次のアイドル状態（描画が完了したタイミングに近い）で
-            // redrawTimeline を発火させる。
             GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                // `this.redrawTimeline` が存在することを確認
                 if (this.redrawTimeline) {
                     this.redrawTimeline.define(Now, true);
                 }
-                // 一度だけ実行するため SOURCE_REMOVE を返す
+
                 return GLib.SOURCE_REMOVE;
             });
-            // ★★★ 追加コードここまで ★★★
-
         }
 
         _handleWindowActivate(actor, item, itemType) {
