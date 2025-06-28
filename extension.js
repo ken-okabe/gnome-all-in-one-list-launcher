@@ -58,8 +58,16 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
         'custom-close': {},
     },
 }, class NonClosingPopupBaseMenuItem extends PopupMenu.PopupBaseMenuItem {
+    // _init で extension インスタンスを受け取るように修正（前回の回答通り）
     _init(params) {
-        super._init(params);
+        // paramsオブジェクトからextensionプロパティを分割代入で取り出す
+        const { extension, ...rest } = params;
+        // 残りのプロパティ(rest)を親クラスのコンストラクタに渡す
+        super._init(rest);
+
+        // 取り出したextensionインスタンスを内部に保存
+        this._extension = extension;
+
         this.activate = (event) => {
             this.emit('custom-activate');
             return false;
@@ -74,6 +82,7 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
         return Clutter.EVENT_PROPAGATE;
     }
     vfunc_key_press_event(keyEvent) {
+
         const symbol = keyEvent.get_key_symbol();
         if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) { return Clutter.EVENT_PROPAGATE; }
         if (symbol === Clutter.KEY_space) { this.emit('custom-activate'); return Clutter.EVENT_STOP; }
@@ -314,6 +323,12 @@ const AppMenuButton = GObject.registerClass(
         }
 
         _onMenuKeyPress(actor, event) {
+
+            this._extension.recoverFocusTimeline.define(Now, true); // 値はなんでも良い。トリガーが目的。
+
+            console.log(`[FocusDebug] recoverFocusTimeline triggered by key press BECAUSE possible focus recovery`);
+
+
             const symbol = event.get_key_symbol();
 
             if (this._isMenuCloseShortcut(symbol, event)) {
@@ -467,7 +482,12 @@ const AppMenuButton = GObject.registerClass(
             if (windowGroups && windowGroups.length > 0) {
                 const sortedGroups = this._sortWindowGroups([...windowGroups], favoriteAppIds);
                 for (const group of sortedGroups) {
-                    const headerItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true, style_class: 'window-list-item app-header-item' });
+                    const headerItem = new NonClosingPopupBaseMenuItem({
+                        extension: this._extension,
+                        reactive: true,
+                        can_focus: true,
+                        style_class: 'window-list-item app-header-item'
+                    });
                     headerItem._itemData = group;
                     headerItem._itemType = 'group';
                     const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER, style_class: 'app-header-container' });
@@ -494,7 +514,12 @@ const AppMenuButton = GObject.registerClass(
 
                     const sortedWindows = group.windows.sort(([winA, tsA], [winB, tsB]) => winA.get_frame_rect().y - winB.get_frame_rect().y);
                     for (const [metaWindow, timestamp] of sortedWindows) {
-                        const windowItem = new NonClosingPopupBaseMenuItem({ reactive: true, can_focus: true, style_class: 'window-list-item window-item' });
+                        const windowItem = new NonClosingPopupBaseMenuItem({
+                            extension: this._extension,
+                            reactive: true,
+                            can_focus: true,
+                            style_class: 'window-list-item window-item'
+                        });
                         windowItem._itemData = [metaWindow, timestamp];
                         windowItem._itemType = 'window';
                         const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'window-item-container' });
@@ -654,6 +679,11 @@ export default class MinimalTimelineExtension extends Extension {
         this.toBeFocusedNewTimeline = null;
         this.toBeFocusedRemoveTimeline = null;
         this.redrawTimeline = null;
+
+        // ★★★ ここから追加 ★★★
+        // フォーカス回復をトリガーするための新しいTimeline
+        this.recoverFocusTimeline = null;
+        // ★★★ 追加ここまで ★★★
     }
 
     _onOpenPopupShortcut() {
@@ -675,6 +705,91 @@ export default class MinimalTimelineExtension extends Extension {
             }
         }
     }
+
+
+
+    /**
+     * 現在アクティブなメニューアイテムがあるかどうかを判定する関数
+     * @returns {boolean} アクティブなアイテムがあればtrue、なければfalse
+     */
+    _hasActiveMenuItem() {
+        try {
+            // メニューボタンが存在し、かつメニューが開いていることを確認
+            if (!this._appMenuButton || !this._appMenuButton.menu.isOpen) {
+                console.log('[ActiveCheck] メニューが開いていないか、メニューボタンが存在しません');
+                return false;
+            }
+
+            const menu = this._appMenuButton.menu;
+            const menuBox = menu.box;
+
+            if (!menuBox) {
+                console.log('[ActiveCheck] メニューボックスが見つかりません');
+                return false;
+            }
+
+            // 方法1: メニューのactive_itemプロパティをチェック
+            if (menu.active_item) {
+                // active_itemが設定されている場合、そのアイテムが有効かチェック
+                const activeItem = menu.active_item;
+                const isVisible = activeItem && activeItem.visible && activeItem.mapped;
+                const canInteract = activeItem.reactive && activeItem.can_focus;
+                const opacity = activeItem.get_paint_opacity();
+                const isNotTransparent = opacity > 0;
+
+                const isValidActive = isVisible && canInteract && isNotTransparent;
+
+                console.log(`[ActiveCheck] active_item存在: ${!!activeItem}, 有効: ${isValidActive}`);
+
+                if (isValidActive) {
+                    return true;
+                }
+            }
+
+            // 方法2: 子要素からキーフォーカスを持つアイテムを探す
+            const children = menuBox.get_children();
+            const focusedItem = children.find(child => {
+                if (!child) return false;
+
+                const hasKeyFocus = child.has_key_focus();
+                const isVisible = child.visible && child.mapped;
+                const canInteract = child.reactive && child.can_focus;
+                const opacity = child.get_paint_opacity();
+                const isNotTransparent = opacity > 0;
+
+                return hasKeyFocus && isVisible && canInteract && isNotTransparent;
+            });
+
+            if (focusedItem) {
+                console.log('[ActiveCheck] キーフォーカスを持つアイテムが見つかりました');
+                return true;
+            }
+
+            // 方法3: ステージレベルでのフォーカス確認
+            const stage = menuBox.get_stage();
+            if (stage) {
+                const keyFocusActor = stage.get_key_focus();
+                if (keyFocusActor) {
+                    // フォーカスされたアクターがメニューの子要素かチェック
+                    const isMenuChild = children.some(child => child === keyFocusActor);
+                    if (isMenuChild) {
+                        console.log('[ActiveCheck] ステージレベルでメニュー内アイテムにフォーカスあり');
+                        return true;
+                    }
+                }
+            }
+
+            console.log('[ActiveCheck] アクティブなアイテムが見つかりませんでした');
+            return false;
+
+        } catch (error) {
+            console.error(`[ActiveCheck] エラーが発生しました: ${error.message}`);
+            return false;
+        }
+    }
+
+
+
 
     // インデックス指定でメニューアイテムに確実にフォーカスする関数
     _focusMenuItemByIndex(targetIndex) {
@@ -846,6 +961,23 @@ export default class MinimalTimelineExtension extends Extension {
         this.toBeFocusedNewTimeline = Timeline(null);
         this.toBeFocusedRemoveTimeline = Timeline(null);
         this.redrawTimeline = Timeline(null);
+
+        // ★★★ ここから追加 ★★★
+        // 新しいTimelineを初期化
+        this.recoverFocusTimeline = Timeline(null);
+
+        // recoverFocusTimeline が更新されたら（＝お願いが来たら）実行する処理を定義
+        this.recoverFocusTimeline.map(() => {
+            // メニューが開いている時だけ処理を実行
+            if (this._appMenuButton && this._appMenuButton.menu.isOpen) {
+                // アクティブなアイテムがないことを確認してからフォーカスを当てる
+                if (!this._hasActiveMenuItem()) {
+                    console.log("[FocusRecovery] No active item detected. Forcing focus to the first item.");
+                    this._focusMenuItemByIndex(0);
+                }
+            }
+        });
+        // ★★★ 追加ここまで ★★★
 
         this.redrawTimeline.map(() => {
             console.log("[FocusDebug] Redraw completed, triggering focus intent application.");
