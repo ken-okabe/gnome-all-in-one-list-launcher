@@ -89,7 +89,6 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
     }
 });
 
-
 // --- WindowModel Class ---
 const WindowModel = GObject.registerClass(
     class WindowModel extends GObject.Object {
@@ -99,7 +98,10 @@ const WindowModel = GObject.registerClass(
             this._windowTracker = Shell.WindowTracker.get_default();
             this._signalIds = new Map();
             this._windowTimestamps = windowTimestamps;
-            this._trackerChangedId = this._windowTracker.connect('tracked-windows-changed', () => this.update());
+
+            // 変更点: 'tracked-windows-changed' から 'restacked' に変更
+            this._restackedId = global.display.connect('restacked', () => this.update());
+
             this.update();
         }
 
@@ -117,13 +119,15 @@ const WindowModel = GObject.registerClass(
                 const a = this._windowTracker.get_window_app(w);
                 if (!a) continue;
 
-                // 'notify::title' に加えて 'position-changed' も監視する
-                const titleId = w.connect('notify::title', () => this.update());
-                const posId = w.connect('position-changed', () => this.update()); // ★ この行を追加
+                // 変更点: 'notify::title' を接続するが、処理は空（ダミー）にする
+                const titleId = w.connect('notify::title', () => { /* ダミーの空処理 */ });
+                // 変更なし: 'position-changed' は引き続き update を呼び出す
+                const posId = w.connect('position-changed', () => this.update());
 
                 // 複数のシグナルIDを配列で保存する
                 this._signalIds.set(w, [titleId, posId]);
 
+                // --- ここから下のデータ構造に関するロジックは一切変更しない ---
                 if (!this._windowTimestamps.has(windowId)) {
                     this._windowTimestamps.set(windowId, Date.now());
                 }
@@ -143,25 +147,29 @@ const WindowModel = GObject.registerClass(
             }
 
             this.windowsTimeline.define(Now, Array.from(windowGroups.values()));
+            // --- ここまでデータ構造に関するロジックは一切変更しない ---
         }
 
         _disconnectWindowSignals() {
             for (const [w, i] of this._signalIds) {
-
                 // 配列に格納された各シグナルIDをループで解除する
                 for (const id of i) {
                     try { if (w && !w.is_destroyed) w.disconnect(id); } catch (e) { }
                 }
-
             }
             this._signalIds.clear();
         }
+
         destroy() {
-            if (this._trackerChangedId) { this._windowTracker.disconnect(this._trackerChangedId); this._trackerChangedId = null; }
+            // 変更点: 'restacked' の接続を解除する
+            if (this._restackedId) {
+                global.display.disconnect(this._restackedId);
+                this._restackedId = null;
+            }
+            // 不要になった 'tracked-windows-changed' の接続解除処理は削除
             this._disconnectWindowSignals();
         }
     });
-
 // --- RunningAppsIconList Class ---
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
