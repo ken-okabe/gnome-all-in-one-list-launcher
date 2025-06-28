@@ -88,7 +88,7 @@ const NonClosingPopupBaseMenuItem = GObject.registerClass({
         return Clutter.EVENT_PROPAGATE;
     }
 });
-
+// --- WindowModel Class ---
 // --- WindowModel Class ---
 const WindowModel = GObject.registerClass(
     class WindowModel extends GObject.Object {
@@ -98,10 +98,7 @@ const WindowModel = GObject.registerClass(
             this._windowTracker = Shell.WindowTracker.get_default();
             this._signalIds = new Map();
             this._windowTimestamps = windowTimestamps;
-
-            // 変更点: 'tracked-windows-changed' から 'restacked' に変更
             this._restackedId = global.display.connect('restacked', () => this.update());
-
             this.update();
         }
 
@@ -119,15 +116,12 @@ const WindowModel = GObject.registerClass(
                 const a = this._windowTracker.get_window_app(w);
                 if (!a) continue;
 
-                // 変更点: 'notify::title' を接続するが、処理は空（ダミー）にする
-                const titleId = w.connect('notify::title', () => { /* ダミーの空処理 */ });
-                // 変更なし: 'position-changed' は引き続き update を呼び出す
                 const posId = w.connect('position-changed', () => this.update());
 
-                // 複数のシグナルIDを配列で保存する
-                this._signalIds.set(w, [titleId, posId]);
+                // ★★★ ここが修正箇所 ★★★
+                // 未定義の titleId への参照を完全に削除
+                this._signalIds.set(w, [posId]);
 
-                // --- ここから下のデータ構造に関するロジックは一切変更しない ---
                 if (!this._windowTimestamps.has(windowId)) {
                     this._windowTimestamps.set(windowId, Date.now());
                 }
@@ -147,26 +141,22 @@ const WindowModel = GObject.registerClass(
             }
 
             this.windowsTimeline.define(Now, Array.from(windowGroups.values()));
-            // --- ここまでデータ構造に関するロジックは一切変更しない ---
         }
 
         _disconnectWindowSignals() {
             for (const [w, i] of this._signalIds) {
-                // 配列に格納された各シグナルIDをループで解除する
                 for (const id of i) {
-                    try { if (w && !w.is_destroyed) w.disconnect(id); } catch (e) { }
+                    try { if (w && !w.is_destroyed()) w.disconnect(id); } catch (e) { }
                 }
             }
             this._signalIds.clear();
         }
-
+        
         destroy() {
-            // 変更点: 'restacked' の接続を解除する
             if (this._restackedId) {
                 global.display.disconnect(this._restackedId);
                 this._restackedId = null;
             }
-            // 不要になった 'tracked-windows-changed' の接続解除処理は削除
             this._disconnectWindowSignals();
         }
     });
@@ -237,6 +227,7 @@ const RunningAppsIndicator = GObject.registerClass(
         }
     }
 );
+
 // --- AppMenuButton Class ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
@@ -244,7 +235,7 @@ const AppMenuButton = GObject.registerClass(
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
 
-            // プロパティの初期化を bind の前に移動
+            // プロパティの初期化
             this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
             this.add_child(this._panelIcon);
             this._extension = extension;
@@ -256,7 +247,6 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedIndex = null;
             this._lastFocusedItem = null;
 
-            // bind内で使用されるプロパティを先に設定する
             this._windowsTimeline = windowsTimeline;
             this._favoritesTimeline = favoritesTimeline;
             this.toBeFocusedNewTimeline = toBeFocusedNewTimeline;
@@ -266,13 +256,18 @@ const AppMenuButton = GObject.registerClass(
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
             this._closeOnListCloseTimeline = closeOnListCloseTimeline;
 
-            // ★★★ 修正点1: マップの役割変更 ★★★
-            // ウィンドウアイテムとその中のラベルへの直接参照を保持するマップ
             this._windowItemsMap = new Map();
             this._windowTitleConnections = new Map();
 
-            // windowsTimelineの構造変化にbindして、タイトル監視のライフサイクルを管理する
-            this._lifecycleManager = windowsTimeline.bind(windowGroups => {
+            // ★★★ ここからが修正箇所 ★★★
+            // windowsTimeline と favoritesTimeline を combineLatestWith で合成する
+            const combinedTimeline = combineLatestWith(
+                (win, fav) => ({ windowGroups: win, favoriteAppIds: fav })
+            )(this._windowsTimeline)(this._favoritesTimeline);
+
+            // 合成されたタイムラインに bind する
+            this._lifecycleManager = combinedTimeline.bind(({ windowGroups, favoriteAppIds }) => {
+                // --- 1. 古いタイトル監視をすべて破棄 ---
                 for (const [win, id] of this._windowTitleConnections) {
                     try {
                         if (win && !win.is_destroyed) win.disconnect(id);
@@ -280,6 +275,7 @@ const AppMenuButton = GObject.registerClass(
                 }
                 this._windowTitleConnections.clear();
 
+                // --- 2. 新しいタイトル監視をセットアップ ---
                 const allWindows = windowGroups.flatMap(g => g.windows.map(([win, ts]) => win));
 
                 for (const metaWindow of allWindows) {
@@ -289,16 +285,20 @@ const AppMenuButton = GObject.registerClass(
                     this._windowTitleConnections.set(metaWindow, connectionId);
                 }
 
-                this._updateWindowsUnit(windowGroups, this._favoritesTimeline.at(Now));
+                // --- 3. UI全体の再描画をトリガー ---
+                // bindから渡された最新の favorites を使って再描画
+                this._updateWindowsUnit(windowGroups, favoriteAppIds);
 
                 return Timeline(true);
             });
+            // ★★★ 修正ここまで ★★★
 
             const initialFavorites = favoritesTimeline.at(Now);
             this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
 
             this._initializeMenuStructure();
 
+            // favoritesTimelineの更新は、お気に入りバーの更新にも必要
             this._favoritesTimeline.map(favoriteAppIds => {
                 if (this._isDestroyed) return;
                 this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
@@ -310,29 +310,21 @@ const AppMenuButton = GObject.registerClass(
             });
         }
 
-        /**
-         * 特定のウィンドウアイテムのタイトル表示だけを更新する。
-         * @param {Meta.Window} metaWindow - タイトルが変更されたウィンドウ
-         */
         _updateSingleWindowTitle(metaWindow) {
-            // ★★★ 修正点2: 堅牢な更新ロジックとデバッグログ ★★★
             try {
                 const windowId = metaWindow.get_stable_sequence();
-                console.log(`[TitleUpdate] Received update for window: ${metaWindow.get_title()} (ID: ${windowId})`);
-
                 const refs = this._windowItemsMap.get(windowId);
 
                 if (refs && refs.label && !refs.label.is_destroyed) {
                     const newTitle = metaWindow.get_title() || '...';
-                    console.log(`[TitleUpdate] Found label. Setting text to: "${newTitle}"`);
                     refs.label.set_text(newTitle);
-                } else {
-                    console.warn(`[TitleUpdate] Could not find label reference for window ID: ${windowId}`);
                 }
             } catch (e) {
-                console.error(`[TitleUpdate] Error during title update: ${e}`);
+                // ignore
             }
         }
+
+        // --- その他のメソッドは変更なし ... ---
 
         open() {
             super.open();
@@ -611,7 +603,6 @@ const AppMenuButton = GObject.registerClass(
                         const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'window-item-container' });
                         windowItem.add_child(windowHbox);
 
-                        // ★★★ 修正点3: ラベルへの参照を保持 ★★★
                         const titleLabel = new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER, style_class: 'window-item-title' });
                         windowHbox.add_child(titleLabel);
 
@@ -625,7 +616,6 @@ const AppMenuButton = GObject.registerClass(
                         this._windowsContainer.push(windowItem);
 
                         const windowId = metaWindow.get_stable_sequence();
-                        // マップには、アイテム本体とラベルへの直接参照を保存する
                         this._windowItemsMap.set(windowId, { item: windowItem, label: titleLabel });
                     }
                 }
