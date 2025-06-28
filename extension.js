@@ -500,6 +500,8 @@ const WindowModel = GObject.registerClass(
             this._signalIds = new Map();
             this._windowTimestamps = windowTimestamps;
             this._restackedId = global.display.connect('restacked', () => this.update());
+            this._isThrottled = false; // この行を追加
+
             this.update();
         }
 
@@ -517,8 +519,19 @@ const WindowModel = GObject.registerClass(
                 const a = this._windowTracker.get_window_app(w);
                 if (!a) continue;
 
-                const posId = w.connect('position-changed', () => this.update());
+                const posId = w.connect('position-changed', () => {
+                    // スロットリング中でなければ、更新処理を実行
+                    if (!this._isThrottled) {
+                        this._isThrottled = true; // フラグを立てる
+                        this.update();           // 即座に更新を実行
 
+                        // 1秒後にフラグを解除するタイマーをセット
+                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                            this._isThrottled = false;
+                            return GLib.SOURCE_REMOVE; // タイマーを一度きりで終了
+                        });
+                    }
+                });
                 // ★★★ ここが修正箇所 ★★★
                 // 未定義の titleId への参照を完全に削除
                 this._signalIds.set(w, [posId]);
