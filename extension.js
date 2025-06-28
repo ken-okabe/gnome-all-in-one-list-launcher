@@ -391,12 +391,30 @@ const AppMenuButton = GObject.registerClass(
                 case 'tab': keySymbol = Clutter.KEY_Tab; break;
                 case 'return': case 'enter': keySymbol = Clutter.KEY_Return; break;
                 case 'escape': keySymbol = Clutter.KEY_Escape; break;
-                case 'f1': keySymbol = Clutter.KEY_F1; break; case 'f2': keySymbol = Clutter.KEY_F2; break;
-                case 'f3': keySymbol = Clutter.KEY_F3; break; case 'f4': keySymbol = Clutter.KEY_F4; break;
-                case 'f5': keySymbol = Clutter.KEY_F5; break; case 'f6': keySymbol = Clutter.KEY_F6; break;
-                case 'f7': keySymbol = Clutter.KEY_F7; break; case 'f8': keySymbol = Clutter.KEY_F8; break;
-                case 'f9': keySymbol = Clutter.KEY_F9; break; case 'f10': keySymbol = Clutter.KEY_F10; break;
-                case 'f11': keySymbol = Clutter.KEY_F11; break; case 'f12': keySymbol = Clutter.KEY_F12; break;
+                case 'f1': keySymbol = Clutter.KEY_F1; break;
+                case 'f2': keySymbol = Clutter.KEY_F2; break;
+                case 'f3': keySymbol = Clutter.KEY_F3; break;
+                case 'f4': keySymbol = Clutter.KEY_F4; break;
+                case 'f5': keySymbol = Clutter.KEY_F5; break;
+                case 'f6': keySymbol = Clutter.KEY_F6; break;
+                case 'f7': keySymbol = Clutter.KEY_F7; break;
+                case 'f8': keySymbol = Clutter.KEY_F8; break;
+                case 'f9': keySymbol = Clutter.KEY_F9; break;
+                case 'f10': keySymbol = Clutter.KEY_F10; break;
+                case 'f11': keySymbol = Clutter.KEY_F11; break;
+                case 'f12': keySymbol = Clutter.KEY_F12; break;
+                case 'f13': keySymbol = Clutter.KEY_F13; break;
+                case 'f14': keySymbol = Clutter.KEY_F14; break;
+                case 'f15': keySymbol = Clutter.KEY_F15; break;
+                case 'f16': keySymbol = Clutter.KEY_F16; break;
+                case 'f17': keySymbol = Clutter.KEY_F17; break;
+                case 'f18': keySymbol = Clutter.KEY_F18; break;
+                case 'f19': keySymbol = Clutter.KEY_F19; break;
+                case 'f20': keySymbol = Clutter.KEY_F20; break;
+                case 'f21': keySymbol = Clutter.KEY_F21; break;
+                case 'f22': keySymbol = Clutter.KEY_F22; break;
+                case 'f23': keySymbol = Clutter.KEY_F23; break;
+                case 'f24': keySymbol = Clutter.KEY_F24; break;
                 default:
                     if (keyName.length === 1) {
                         const char = keyName.toLowerCase();
