@@ -560,7 +560,14 @@ const AppMenuButton = GObject.registerClass(
             this._flashIcon('red');
 
             this.toBeFocusedNewTimeline.define(Now, null);
-            const focusableItems = Array.from(this.menu).filter(i => i && i.reactive);
+
+            // ★★★ ここからが修正箇所 ★★★
+            // 正しい方法でメニューから全てのアイテムを取得する
+            const allItems = this.menu._getMenuItems();
+            // その中からフォーカス可能な（reactiveな）アイテムだけをフィルタリング
+            const focusableItems = allItems.filter(i => i && i.reactive);
+            // ★★★ 修正ここまで ★★★
+
             const itemIndex = focusableItems.indexOf(actor);
             console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`);
             this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
@@ -923,7 +930,12 @@ export default class MinimalTimelineExtension extends Extension {
                 }
 
             } else if (indexToFocus !== null && indexToFocus >= 0) {
-                const focusableItems = Array.from(this._appMenuButton.menu).filter(item => item && item.reactive);
+                // ★★★ ここからが修正箇所 ★★★
+                const allItems = this._appMenuButton.menu._getMenuItems();
+                const focusableItems = allItems.filter(item => item && item.reactive);
+                // ★★★ 修正ここまで ★★★
+
+
                 if (focusableItems.length > 0) {
                     if (indexToFocus > 0) {
                         const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
