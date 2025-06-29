@@ -83,7 +83,7 @@ const ImprovedTooltip = GObject.registerClass(
     class ImprovedTooltip extends St.Label {
         _init() {
             super._init({
-                style_class: 'tooltip-label',
+                style_class: 'aio-tooltip-label',
                 reactive: false,
                 can_focus: false,
                 track_hover: false,
@@ -578,7 +578,7 @@ const WindowModel = GObject.registerClass(
 const RunningAppsIconList = GObject.registerClass(
     class RunningAppsIconList extends St.BoxLayout {
         _init() {
-            super._init({ style_class: 'window-icon-list-container' });
+            super._init({ style_class: 'aio-window-icon-list-container' });
             this._windowTracker = Shell.WindowTracker.get_default();
         }
 
@@ -606,8 +606,8 @@ const RunningAppsIconList = GObject.registerClass(
                     const app = this._windowTracker.get_window_app(win);
                     if (!app) continue;
 
-                    const icon = new St.Icon({ gicon: app.get_icon(), style_class: 'panel-window-icon' });
-                    const button = new St.Button({ child: icon, style_class: 'panel-button' });
+                    const icon = new St.Icon({ gicon: app.get_icon(), style_class: 'aio-panel-window-icon' });
+                    const button = new St.Button({ child: icon, style_class: 'aio-panel-button' });
                     button.connect('clicked', () => Main.activateWindow(win));
 
                     addTooltip(button, app.get_name()); // この行を追加
@@ -935,12 +935,12 @@ const AppMenuButton = GObject.registerClass(
             this._favoriteButtons = [];
             if (favoriteAppIds && favoriteAppIds.length > 0) {
                 this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-                const favoritesBox = new St.BoxLayout({ x_expand: true, style_class: 'favorites-bar-container' });
+                const favoritesBox = new St.BoxLayout({ x_expand: true, style_class: 'aio-favorites-bar-container' });
                 this._favoritesContainer.add_child(favoritesBox);
                 for (const [index, appId] of favoriteAppIds.entries()) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (!app) continue;
-                    const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'favorite-bar-app-icon' }), style_class: 'favorite-button', can_focus: false, track_hover: true });
+                    const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'aio-favorite-bar-app-icon' }), style_class: 'aio-favorite-button', can_focus: false, track_hover: true });
                     button.connect('clicked', () => { this._selectedFavoriteIndexTimeline.define(Now, index); this._handleFavLaunch(); });
                     button.connect('enter-event', () => { this._selectedFavoriteIndexTimeline.define(Now, index); });
 
@@ -980,24 +980,24 @@ const AppMenuButton = GObject.registerClass(
                     const headerItem = new NonClosingPopupBaseMenuItem({
                         reactive: true,
                         can_focus: true,
-                        style_class: 'window-list-item app-header-item'
+                        style_class: 'aio-window-list-item aio-window-list-group-header'
                     });
                     headerItem._itemData = group;
                     headerItem._itemType = 'group';
-                    const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER, style_class: 'app-header-container' });
+                    const hbox = new St.BoxLayout({ x_expand: true, y_align: Clutter.ActorAlign.CENTER, style_class: 'aio-window-list-group-container' });
                     headerItem.add_child(hbox);
-                    hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20, style_class: 'app-header-icon' }));
-                    hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER, style_class: 'app-header-title' }));
+                    hbox.add_child(new St.Icon({ gicon: group.app.get_icon(), icon_size: 20, style_class: 'aio-window-list-group-icon' }));
+                    hbox.add_child(new St.Label({ text: group.app.get_name(), y_align: Clutter.ActorAlign.CENTER, style_class: 'aio-window-list-group-title' }));
                     hbox.add_child(new St.Widget({ x_expand: true }));
-                    const actionsContainer = new St.BoxLayout({ style_class: 'item-actions-container' });
+                    const actionsContainer = new St.BoxLayout({ style_class: 'aio-window-list-actions' });
                     if (this._isAppLaunchable(group.app)) {
                         const isFavorite = favoriteAppIds.includes(group.app.get_id());
                         const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
-                        const starButton = new St.Button({ style_class: 'favorite-star-button', child: new St.Icon({ icon_name: starIcon, style_class: 'popup-menu-icon' }) });
+                        const starButton = new St.Button({ style_class: 'aio-window-list-star-button', child: new St.Icon({ icon_name: starIcon, style_class: 'aio-window-list-icon' }) });
                         starButton.connect('clicked', () => { this._extension._toggleFavorite(group.app.get_id()); });
                         actionsContainer.add_child(starButton);
                     }
-                    const groupCloseButton = new St.Button({ style_class: 'window-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
+                    const groupCloseButton = new St.Button({ style_class: 'aio-window-list-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                     groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
                     actionsContainer.add_child(groupCloseButton);
                     hbox.add_child(actionsContainer);
@@ -1016,18 +1016,18 @@ const AppMenuButton = GObject.registerClass(
                         const windowItem = new NonClosingPopupBaseMenuItem({
                             reactive: true,
                             can_focus: true,
-                            style_class: 'window-list-item window-item'
+                            style_class: 'aio-window-list-item aio-window-list-window-item'
                         });
                         windowItem._itemData = [metaWindow, timestamp];
                         windowItem._itemType = 'window';
-                        const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'window-item-container' });
+                        const windowHbox = new St.BoxLayout({ x_expand: true, style_class: 'aio-window-list-aio-window-list-window-container' });
                         windowItem.add_child(windowHbox);
 
-                        const titleLabel = new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER, style_class: 'window-item-title' });
+                        const titleLabel = new St.Label({ text: metaWindow.get_title() || '...', y_align: Clutter.ActorAlign.CENTER, style_class: 'aio-window-list-aio-window-list-window-title' });
                         windowHbox.add_child(titleLabel);
 
                         windowHbox.add_child(new St.Widget({ x_expand: true }));
-                        const windowCloseButton = new St.Button({ style_class: 'window-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
+                        const windowCloseButton = new St.Button({ style_class: 'aio-window-list-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                         windowCloseButton.connect('clicked', () => windowItem.emit('custom-close'));
                         windowHbox.add_child(windowCloseButton);
                         windowItem.connect('custom-activate', () => this._handleWindowActivate(windowItem, metaWindow, 'window'));
