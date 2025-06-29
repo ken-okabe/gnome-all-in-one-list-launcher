@@ -648,6 +648,7 @@ const RunningAppsIndicator = GObject.registerClass(
 // --- AppMenuButton Class ---
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
+        // ★ 修正: _selectedFavoriteIndexTimeline から _selectedFavoriteIdTimeline へ変更
         _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
@@ -660,9 +661,9 @@ const AppMenuButton = GObject.registerClass(
             this._favoritesContainer = null;
             this._separatorItem = null;
             this._windowsContainer = [];
-            this._favoriteButtons = [];
-            this._lastSelectedIndex = null;
+            this._favoriteButtons = []; // ★ St.Buttonの配列として利用
             this._lastFocusedItem = null;
+            this._lastSelectedAppId = null; // ★ indexからappIdへ変更
 
             this._windowsTimeline = windowsTimeline;
             this._favoritesTimeline = favoritesTimeline;
@@ -676,13 +677,12 @@ const AppMenuButton = GObject.registerClass(
             this._windowItemsMap = new Map();
             this._windowTitleConnections = new Map();
 
-            // ★★★ ここからが修正箇所 ★★★
-            // windowsTimeline と favoritesTimeline を combineLatestWith で合成する
+            // (ウィンドウリスト関連のコードは変更なし)
+            // --- ここから ---
             const combinedTimeline = combineLatestWith(
                 (win, fav) => ({ windowGroups: win, favoriteAppIds: fav })
             )(this._windowsTimeline)(this._favoritesTimeline);
 
-            // 合成されたタイムラインに bind する
             this._lifecycleManager = combinedTimeline.bind(({ windowGroups, favoriteAppIds }) => {
                 // --- 1. 古いタイトル監視をすべて破棄 ---
                 for (const [win, id] of this._windowTitleConnections) {
@@ -701,29 +701,30 @@ const AppMenuButton = GObject.registerClass(
                     });
                     this._windowTitleConnections.set(metaWindow, connectionId);
                 }
-
-                // --- 3. UI全体の再描画をトリガー ---
-                // bindから渡された最新の favorites を使って再描画
                 this._updateWindowsUnit(windowGroups, favoriteAppIds);
-
                 return Timeline(true);
             });
-            // ★★★ 修正ここまで ★★★
+            // --- ここまで ---
 
+
+            // ★ 修正: 選択状態をapp-idで管理するTimeline
             const initialFavorites = favoritesTimeline.at(Now);
-            this._selectedFavoriteIndexTimeline = Timeline(initialFavorites.length > 0 ? 0 : null);
+            const initialAppId = initialFavorites.length > 0 ? initialFavorites[0] : null;
+            this._selectedFavoriteIdTimeline = Timeline(initialAppId);
 
             this._initializeMenuStructure();
 
-            // favoritesTimelineの更新は、お気に入りバーの更新にも必要
+            // favoritesTimelineの更新を監視
             this._favoritesTimeline.map(favoriteAppIds => {
                 if (this._isDestroyed) return;
-                this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIndexTimeline.at(Now));
+                // ★ 修正: 現在選択されているapp-idを渡す
+                this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIdTimeline.at(Now));
             });
 
-            this._selectedFavoriteIndexTimeline.map(selectedIndex => {
+            // ★ 修正: 選択されたapp-idの変更を監視してUIを更新
+            this._selectedFavoriteIdTimeline.map(selectedId => {
                 if (this._isDestroyed) return;
-                this._updateFavoriteSelection(selectedIndex);
+                this._updateFavoriteSelection(selectedId);
             });
         }
 
@@ -741,16 +742,15 @@ const AppMenuButton = GObject.registerClass(
             }
         }
 
-        // --- その他のメソッドは変更なし ... ---
-
         open() {
             super.open();
             this.menu.actor.grab_key_focus();
         }
 
+        // ★ 修正: app-idベースで管理するため、close時のリセット対象を変更
         close() {
             super.close();
-            this._selectedFavoriteIndexTimeline.define(Now, null);
+            this._selectedFavoriteIdTimeline.define(Now, null);
         }
 
         _flashIcon(color) {
@@ -775,22 +775,19 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedIndex = null;
         }
 
+        // ★ 修正: app-idベースで管理するため、close時のリセット対象を変更
         _handleFavLaunch() {
             this._flashIcon('blue');
-            const selectedIndex = this._selectedFavoriteIndexTimeline.at(Now);
-            if (selectedIndex !== null && selectedIndex >= 0) {
-                const favs = this._extension._favsSettings.get_strv('favorite-apps');
-                const appId = favs[selectedIndex];
-                if (appId) {
-                    const app = Shell.AppSystem.get_default().lookup_app(appId);
-                    if (app) {
-                        console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`);
-                        this.toBeFocusedNewTimeline.define(Now, app);
-                        this.toBeFocusedRemoveTimeline.define(Now, null);
-                        this._launchNewInstance(app);
-                        if (this._closeOnFavLaunchTimeline.at(Now)) {
-                            this.menu.close();
-                        }
+            const appId = this._selectedFavoriteIdTimeline.at(Now);
+            if (appId) {
+                const app = Shell.AppSystem.get_default().lookup_app(appId);
+                if (app) {
+                    console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`);
+                    this.toBeFocusedNewTimeline.define(Now, app);
+                    this.toBeFocusedRemoveTimeline.define(Now, null);
+                    this._launchNewInstance(app);
+                    if (this._closeOnFavLaunchTimeline.at(Now)) {
+                        this.menu.close();
                     }
                 }
             }
@@ -809,10 +806,16 @@ const AppMenuButton = GObject.registerClass(
                 this._flashIcon('orange');
                 const favs = this._extension._favsSettings.get_strv('favorite-apps');
                 if (favs.length > 0) {
+                    const currentId = this._selectedFavoriteIdTimeline.at(Now);
+                    let currentIndex = favs.indexOf(currentId);
+                    // 現在選択中のIDが見つからない場合(nullなど)は先頭を基準にする
+                    if (currentIndex === -1) currentIndex = 0;
+
                     const direction = (symbol === Clutter.KEY_Left) ? -1 : 1;
-                    const currentIndex = this._selectedFavoriteIndexTimeline.at(Now) ?? favs.length;
                     const newIndex = (currentIndex + direction + favs.length) % favs.length;
-                    this._selectedFavoriteIndexTimeline.define(Now, newIndex);
+                    const newId = favs[newIndex];
+
+                    this._selectedFavoriteIdTimeline.define(Now, newId);
                 }
                 return Clutter.EVENT_STOP;
             }
@@ -922,89 +925,81 @@ const AppMenuButton = GObject.registerClass(
             tryNextMethod(0);
         }
 
-        _updateFavoriteSelection(newIndex) {
-            const oldIndex = this._lastSelectedIndex;
-            if (oldIndex !== null && this._favoriteButtons[oldIndex]) this._favoriteButtons[oldIndex].remove_style_class_name('selected');
-            if (newIndex !== null && this._favoriteButtons[newIndex]) this._favoriteButtons[newIndex].add_style_class_name('selected');
-            this._lastSelectedIndex = newIndex;
+        // ★ 修正: 選択されたapp-idに基づいてハイライトを更新
+        _updateFavoriteSelection(newSelectedId) {
+            const oldSelectedId = this._lastSelectedAppId;
+
+            // 古い選択ボタンから .selected クラスを削除
+            if (oldSelectedId) {
+                const oldButton = this._favoriteButtons.find(b => b._appId === oldSelectedId);
+                if (oldButton) {
+                    oldButton.remove_style_class_name('selected');
+                }
+            }
+
+            // 新しい選択ボタンに .selected クラスを追加
+            if (newSelectedId) {
+                const newButton = this._favoriteButtons.find(b => b._appId === newSelectedId);
+                if (newButton) {
+                    newButton.add_style_class_name('selected');
+                }
+            }
+
+            this._lastSelectedAppId = newSelectedId;
         }
 
-        // extension.js の _updateFavoritesUnit 関数全体
-
-        _updateFavoritesUnit(favoriteAppIds, selectedIndex) {
+        // ★ 修正: UI構築とイベント接続をIDベースに
+        _updateFavoritesUnit(favoriteAppIds, selectedAppId) {
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
             this._favoriteButtons = [];
 
             if (favoriteAppIds && favoriteAppIds.length > 0) {
-                this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({
-                    reactive: false,
-                    can_focus: false
-                });
-
-                // 新しいコンテナ構造を作成
-                const topLevelFavoritesBox = new St.BoxLayout({
-                    x_expand: true,
-                    style_class: 'aio-favorites-bar-container', // 新しいクラス名（既存と合わせる）
-                    // 内部で justify-content: space-between を適用するためにflexコンテナにする
-                    // CSSで設定されているので、JS側では不要
-                });
+                this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
+                const topLevelFavoritesBox = new St.BoxLayout({ x_expand: true, style_class: 'aio-favorites-bar-container' });
                 this._favoritesContainer.add_child(topLevelFavoritesBox);
+                const favoritesGroupContainer = new St.BoxLayout({ style_class: 'aio-favorites-group' });
 
-                // お気に入りボタン群を格納する左側のコンテナ
-                const favoritesGroupContainer = new St.BoxLayout({
-                    style_class: 'aio-favorites-group', // 既存のクラス名
-                });
-
-                for (const [index, appId] of favoriteAppIds.entries()) {
+                // ★ indexは不要になったが、可読性のために残す
+                for (const appId of favoriteAppIds) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (!app) continue;
 
                     const button = new St.Button({
-                        child: new St.Icon({
-                            gicon: app.get_icon(),
-                            style_class: 'aio-favorite-icon'
-                        }),
+                        child: new St.Icon({ gicon: app.get_icon(), style_class: 'aio-favorite-icon' }),
                         style_class: 'aio-favorite-button',
                         can_focus: false,
                         track_hover: true
                     });
 
+                    // ★ ボタン自体にappIdを持たせる
+                    button._appId = appId;
+
                     button.connect('clicked', () => {
-                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                        // ★ クリックされたボタンのappIdでTimelineを更新
+                        this._selectedFavoriteIdTimeline.define(Now, appId);
                         this._handleFavLaunch();
                     });
                     button.connect('enter-event', () => {
-                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                        // ★ ホバーされたボタンのappIdでTimelineを更新
+                        this._selectedFavoriteIdTimeline.define(Now, appId);
                     });
 
                     addTooltip(button, app.get_name());
-                    this._favoriteButtons[index] = button;
+                    this._favoriteButtons.push(button); // ★ 配列に直接push
                     favoritesGroupContainer.add_child(button);
                 }
 
-                // ★追加：Settingsアイコンを右端に押し込むための可変スペーサー
                 const settingsSpacer = new St.Widget({ x_expand: true, x_align: Clutter.ActorAlign.FILL });
                 topLevelFavoritesBox.add_child(favoritesGroupContainer);
                 topLevelFavoritesBox.add_child(settingsSpacer);
 
-                // 設定ボタン
                 const settingsButton = new St.Button({
-                    child: new St.Icon({
-                        icon_name: 'preferences-system-symbolic',
-                        style_class: 'aio-settings-icon'
-                    }),
-                    style_class: 'aio-settings-button',
-                    can_focus: false,
-                    track_hover: true
+                    child: new St.Icon({ icon_name: 'preferences-system-symbolic', style_class: 'aio-settings-icon' }),
+                    style_class: 'aio-settings-button', can_focus: false, track_hover: true
                 });
-
-                settingsButton.connect('clicked', () => {
-                    this._openSettings();
-                });
-
+                settingsButton.connect('clicked', () => { this._openSettings(); });
                 addTooltip(settingsButton, 'Settings');
-
                 topLevelFavoritesBox.add_child(settingsButton);
 
                 if (this.menu.numMenuItems > 0) {
@@ -1013,9 +1008,11 @@ const AppMenuButton = GObject.registerClass(
                     this.menu.addMenuItem(this._favoritesContainer);
                 }
 
-                this._updateFavoriteSelection(selectedIndex);
+                // ★ 選択中のapp-idでハイライトを更新
+                this._updateFavoriteSelection(selectedAppId);
             }
         }
+
         _openSettings() {
             this._extension.openPreferences();
             this.menu.close();
