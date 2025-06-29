@@ -649,7 +649,7 @@ const RunningAppsIndicator = GObject.registerClass(
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
         // ★ 修正: _selectedFavoriteIndexTimeline から _selectedFavoriteIdTimeline へ変更
-        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedRemoveTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
+        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedIndexCloseTimeline, toBeFocusedIndexActivateTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
 
@@ -668,7 +668,8 @@ const AppMenuButton = GObject.registerClass(
             this._windowsTimeline = windowsTimeline;
             this._favoritesTimeline = favoritesTimeline;
             this.toBeFocusedNewTimeline = toBeFocusedNewTimeline;
-            this.toBeFocusedRemoveTimeline = toBeFocusedRemoveTimeline;
+            this.toBeFocusedIndexCloseTimeline = toBeFocusedIndexCloseTimeline;
+            this.toBeFocusedIndexActivateTimeline = toBeFocusedIndexActivateTimeline;
             this.redrawTimeline = redrawTimeline;
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
@@ -782,13 +783,18 @@ const AppMenuButton = GObject.registerClass(
             if (appId) {
                 const app = Shell.AppSystem.get_default().lookup_app(appId);
                 if (app) {
-                    console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`);
-                    this.toBeFocusedNewTimeline.define(Now, app);
-                    this.toBeFocusedRemoveTimeline.define(Now, null);
-                    this._launchNewInstance(app);
                     if (this._closeOnFavLaunchTimeline.at(Now)) {
                         this.menu.close();
+                    } else {
+                        console.log(`[FocusDebug] _handleFavLaunch: Setting focus intent for app: ${app.get_id()}`);
+                        this.toBeFocusedNewTimeline.define(Now, app);
+                        this.toBeFocusedIndexCloseTimeline.define(Now, null);
+                        this.toBeFocusedIndexActivateTimeline.define(Now, null);
+
                     }
+
+                    this._launchNewInstance(app);
+
                 }
             }
         }
@@ -1133,26 +1139,46 @@ const AppMenuButton = GObject.registerClass(
         }
 
         _handleWindowActivate(actor, item, itemType) {
+
             this._flashIcon('green');
-            this._activateSelection(actor, item, itemType);
             if (this._closeOnListActivateTimeline.at(Now)) {
                 this.menu.close();
+            } else {
+
+                const allItems = this.menu._getMenuItems();
+                const focusableItems = allItems.filter(i => i && i.reactive);
+                const itemIndex = focusableItems.indexOf(actor);
+                console.log(`[FocusDebug] _handleWindowClose/Activate: Setting focus intent for index: ${itemIndex}`);
+                this.toBeFocusedNewTimeline.define(Now, null);
+                this.toBeFocusedIndexCloseTimeline.define(Now, null);
+                this.toBeFocusedIndexActivateTimeline.define(Now, itemIndex);
+
+                this.redrawTimeline.define(Now, true);
+
             }
+
+            this._activateSelection(actor, item, itemType);
         }
 
         _handleWindowClose(actor, item, itemType) {
             this._flashIcon('red');
-            this.toBeFocusedNewTimeline.define(Now, null);
-            const allItems = this.menu._getMenuItems();
-            const focusableItems = allItems.filter(i => i && i.reactive);
-            const itemIndex = focusableItems.indexOf(actor);
-            console.log(`[FocusDebug] _handleWindowClose: Setting focus intent for index: ${itemIndex}`);
-            this.toBeFocusedRemoveTimeline.define(Now, itemIndex);
-            this._closeSelection(actor, item, itemType);
             if (this._closeOnListCloseTimeline.at(Now)) {
                 this.menu.close();
+            } else {
+
+                const allItems = this.menu._getMenuItems();
+                const focusableItems = allItems.filter(i => i && i.reactive);
+                const itemIndex = focusableItems.indexOf(actor);
+                console.log(`[FocusDebug] _handleWindowClose/Activate: Setting focus intent for index: ${itemIndex}`);
+                this.toBeFocusedNewTimeline.define(Now, null);
+                this.toBeFocusedIndexCloseTimeline.define(Now, itemIndex);
+                this.toBeFocusedIndexActivateTimeline.define(Now, null);
+
             }
+
+            this._closeSelection(actor, item, itemType);
         }
+
 
         _closeSelection(actor, item, itemType) {
             if (this._isDestroyed) return;
@@ -1267,7 +1293,9 @@ export default class MinimalTimelineExtension extends Extension {
 
         this._windowTimestamps = null;
         this.toBeFocusedNewTimeline = null;
-        this.toBeFocusedRemoveTimeline = null;
+        this.toBeFocusedIndexCloseTimeline = null;
+        this.toBeFocusedIndexActivateTimeline = null;
+
         this.redrawTimeline = null;
 
         // ★★★ ここから追加 ★★★
@@ -1481,14 +1509,16 @@ export default class MinimalTimelineExtension extends Extension {
 
     _applyFocusIntent() {
         const appToFocus = this.toBeFocusedNewTimeline.at(Now);
-        const indexToFocus = this.toBeFocusedRemoveTimeline.at(Now);
+        const indexCloseToFocus = this.toBeFocusedIndexCloseTimeline.at(Now);
+        const indexActivateToFocus = this.toBeFocusedIndexActivateTimeline.at(Now);
 
-        console.log(`[FocusDebug] _applyFocusIntent: Called. appToFocus: ${appToFocus?.get_id() || 'null'}, indexToFocus: ${indexToFocus}`);
+        console.log(`[FocusDebug] _applyFocusIntent: Called. appToFocus: ${appToFocus?.get_id() || 'null'}, indexCloseToFocus: ${indexCloseToFocus}, indexActivateToFocus: ${indexActivateToFocus}`);
 
-        if (!appToFocus && indexToFocus === null) return;
+        if (!appToFocus && indexCloseToFocus === null && indexActivateToFocus === null) return;
 
         this.toBeFocusedNewTimeline.define(Now, null);
-        this.toBeFocusedRemoveTimeline.define(Now, null);
+        this.toBeFocusedIndexCloseTimeline.define(Now, null);
+        this.toBeFocusedIndexActivateTimeline.define(Now, null);
 
         const focus = () => {
 
@@ -1520,7 +1550,7 @@ export default class MinimalTimelineExtension extends Extension {
                     console.log(`[FocusDebug] _applyFocusIntent: No target window found for app: ${appToFocus.get_id()}`);
                 }
 
-            } else if (indexToFocus !== null && indexToFocus >= 0) {
+            } else if (indexCloseToFocus !== null && indexCloseToFocus >= 0) {
                 // ★★★ ここからが修正箇所 ★★★
                 const allItems = this._appMenuButton.menu._getMenuItems();
                 const focusableItems = allItems.filter(item => item && item.reactive);
@@ -1528,8 +1558,8 @@ export default class MinimalTimelineExtension extends Extension {
 
 
                 if (focusableItems.length > 0) {
-                    if (indexToFocus > 0) {
-                        const newFocusIndex = Math.min(indexToFocus - 1, focusableItems.length - 1);
+                    if (indexCloseToFocus > 0) {
+                        const newFocusIndex = Math.min(indexCloseToFocus - 1, focusableItems.length - 1);
                         console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at new index: ${newFocusIndex}`);
                         this._focusMenuItemByIndex(newFocusIndex);
                     } else {
@@ -1539,6 +1569,10 @@ export default class MinimalTimelineExtension extends Extension {
                 } else {
                     console.log(`[FocusDebug] _applyFocusIntent: No focusable items found after closing.`);
                 }
+            } else if (indexActivateToFocus !== null && indexActivateToFocus >= 0) {
+                console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at index: ${indexActivateToFocus}`);
+
+                this._focusMenuItemByIndex(indexActivateToFocus);
             }
         };
 
@@ -1554,7 +1588,9 @@ export default class MinimalTimelineExtension extends Extension {
 
         this._windowTimestamps = new Map();
         this.toBeFocusedNewTimeline = Timeline(null);
-        this.toBeFocusedRemoveTimeline = Timeline(null);
+        this.toBeFocusedIndexCloseTimeline = Timeline(null);
+        this.toBeFocusedIndexActivateTimeline = Timeline(null);
+
         this.redrawTimeline = Timeline(null);
 
         // ★★★ ここから追加 ★★★
@@ -1634,7 +1670,9 @@ export default class MinimalTimelineExtension extends Extension {
                         windowsTimeline: this._windowModel.windowsTimeline,
                         favoritesTimeline: favoritesTimeline,
                         toBeFocusedNewTimeline: this.toBeFocusedNewTimeline,
-                        toBeFocusedRemoveTimeline: this.toBeFocusedRemoveTimeline,
+                        toBeFocusedIndexCloseTimeline: this.toBeFocusedIndexCloseTimeline,
+                        toBeFocusedIndexActivateTimeline: this.toBeFocusedIndexActivateTimeline,
+
                         redrawTimeline: this.redrawTimeline,
                         closeOnFavLaunchTimeline: closeOnFavLaunchTimeline,
                         closeOnListActivateTimeline: closeOnListActivateTimeline,
