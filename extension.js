@@ -933,26 +933,88 @@ const AppMenuButton = GObject.registerClass(
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
             this._favoriteButtons = [];
+
             if (favoriteAppIds && favoriteAppIds.length > 0) {
-                this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false });
-                const favoritesBox = new St.BoxLayout({ x_expand: true, style_class: 'aio-favorites-bar-container' });
+                this._favoritesContainer = new PopupMenu.PopupBaseMenuItem({
+                    reactive: false,
+                    can_focus: false
+                });
+
+                const favoritesBox = new St.BoxLayout({
+                    x_expand: true,
+                    style_class: 'aio-favorites-bar'
+                });
+
                 this._favoritesContainer.add_child(favoritesBox);
+
+                // お気に入りボタン群
+                const favoritesGroup = new St.BoxLayout({
+                    style_class: 'aio-favorites-group'
+                });
+
                 for (const [index, appId] of favoriteAppIds.entries()) {
                     const app = Shell.AppSystem.get_default().lookup_app(appId);
                     if (!app) continue;
-                    const button = new St.Button({ child: new St.Icon({ gicon: app.get_icon(), icon_size: 28, style_class: 'aio-favorite-bar-app-icon' }), style_class: 'aio-favorite-button', can_focus: false, track_hover: true });
-                    button.connect('clicked', () => { this._selectedFavoriteIndexTimeline.define(Now, index); this._handleFavLaunch(); });
-                    button.connect('enter-event', () => { this._selectedFavoriteIndexTimeline.define(Now, index); });
 
-                    addTooltip(button, app.get_name()); // この行を追加
+                    const button = new St.Button({
+                        child: new St.Icon({
+                            gicon: app.get_icon(),
+                            // icon_size: 28, ← 削除！CSSで制御
+                            style_class: 'aio-favorite-icon'
+                        }),
+                        style_class: 'aio-favorite-button',
+                        can_focus: false,
+                        track_hover: true
+                    });
 
+                    button.connect('clicked', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                        this._handleFavLaunch();
+                    });
+                    button.connect('enter-event', () => {
+                        this._selectedFavoriteIndexTimeline.define(Now, index);
+                    });
+
+                    addTooltip(button, app.get_name());
                     this._favoriteButtons[index] = button;
-                    favoritesBox.add_child(button);
+                    favoritesGroup.add_child(button);
                 }
-                if (this.menu.numMenuItems > 0) this.menu.box.insert_child_at_index(this._favoritesContainer.actor, 0);
-                else this.menu.addMenuItem(this._favoritesContainer);
+
+                // 設定ボタン
+                const settingsButton = new St.Button({
+                    child: new St.Icon({
+                        icon_name: 'preferences-system-symbolic',
+                        // icon_size: 20, ← 削除！CSSで制御
+                        style_class: 'aio-settings-icon'
+                    }),
+                    style_class: 'aio-settings-button',
+                    can_focus: false,
+                    track_hover: true
+                });
+
+                settingsButton.connect('clicked', () => {
+                    this._openSettings();
+                });
+
+                addTooltip(settingsButton, 'Settings');
+
+                favoritesBox.add_child(favoritesGroup);
+                favoritesBox.add_child(settingsButton);
+
+                if (this.menu.numMenuItems > 0) {
+                    this.menu.box.insert_child_at_index(this._favoritesContainer.actor, 0);
+                } else {
+                    this.menu.addMenuItem(this._favoritesContainer);
+                }
+
                 this._updateFavoriteSelection(selectedIndex);
             }
+        }
+
+
+        _openSettings() {
+            this._extension.openPreferences();
+            this.menu.close();
         }
 
         _sortWindowGroups(windowGroups, favoriteAppIds) {
