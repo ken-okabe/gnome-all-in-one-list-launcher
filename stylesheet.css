@@ -14,10 +14,25 @@
 
 /* お気に入りバー - 標準サイズに調整 */
 .aio-favorites-bar-container {
-    gap: 4px;
+    /* gap: 4px; を削除 - spacerで対応 */
+    display: flex;
+    justify-content: space-between;
+    /* settingsSpacerがx_expandを持つため、これが機能する */
+    align-items: center;
 }
 
+/* Settings アイコンを右端に配置 */
+.aio-settings-button {
+    padding: 3px 6px;
+    border-radius: 8px;
+    transition: all 150ms ease-out;
+}
 
+.aio-settings-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* お気に入りボタン */
 .aio-favorite-button {
     padding: 3px 6px;
     border-radius: 8px;
@@ -26,7 +41,6 @@
 
 .aio-favorite-button:hover {
     background-color: rgba(255, 255, 255, 0.12);
-    transform: translateY(-1px);
 }
 
 .aio-favorite-button.selected {
@@ -37,34 +51,43 @@
 
 /* ヘッダー項目 - フォントサイズとスペーシング改善 */
 .aio-window-list-item .aio-window-list-icon {
-    margin-right: 8px;
+    margin-right: 12px;
     icon-size: 20px;
 }
 
-/* ヘッダー項目のラベル（アプリ名） - フォント拡大を維持 */
+/* ヘッダー項目のラベル（アプリ名） - フォントを標準に調整 (1em) */
 .aio-window-list-item St-Label {
     font-weight: bold;
-    font-size: 1.05em;
+    /* font-size: 1em; */
+    /* Base font size */
     color: rgba(255, 255, 255, 0.95);
 }
 
-/* より具体的なセレクタでヘッダー項目をターゲット - フォント拡大を維持 */
+/* より具体的なセレクタでヘッダー項目をターゲット - フォントを標準に調整 (1em) */
 .aio-window-list-item[data-type="group"] St-Label {
     font-weight: bold;
-    font-size: 1.05em;
+    /* font-size: 1em; */
+    /* Base font size */
     color: rgba(255, 255, 255, 0.95);
 }
 
-/* アプリヘッダー項目の専用スタイル - 標準パディング */
+/* Headerのタイトルテキストだけを1.15倍に */
+.aio-window-list-group-title {
+    font-weight: bold;
+    font-size: 1.15em;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* アプリヘッダー項目の専用スタイル */
 .aio-window-list-group-header {
-    padding: 6px 8px;
-    margin: 1px 0 2px 0;
-    border-radius: 6px;
+    /* 標準のPopupMenuItemに近い値に調整 */
+    padding: 5px 18px;
+    /* ★変更: 左右パディングを14pxから18pxに増やし、上下を6pxに固定 */
+    margin: 0;
+    /* ★変更: マージンを完全に削除し、標準に近づける */
+    border-radius: 3px;
     transition: all 150ms ease-out;
-    /* より見やすいグループ区切りのセパレータ */
-    border-bottom: 2px solid rgba(255, 255, 255, 0.15);
     background-color: rgba(255, 255, 255, 0.02);
-    /* 薄い背景でグループを強調 */
 }
 
 .aio-window-list-group-container {
@@ -73,33 +96,27 @@
 
 .aio-window-list-group-icon {
     icon-size: 20px;
-    margin-right: 8px;
+    margin-right: 12px;
 }
 
-.aio-window-list-group-title {
-    font-weight: bold;
-    font-size: 1.05em;
-    /* フォント拡大を維持 */
-    color: rgba(255, 255, 255, 0.95);
-}
-
-/* ウィンドウ項目の専用スタイル - 標準パディング */
+/* ウィンドウ項目の専用スタイル */
 .aio-window-list-window-item {
-    padding: 4px 8px;
-    margin: 1px 0;
-    border-radius: 5px;
+    /* 標準のPopupMenuItemに近い値に調整 */
+    padding: 5px 18px;
+    /* ★変更: 左右パディングを14pxから18pxに増やし、上下を5pxに固定 */
+    margin: 0;
+    /* ★変更: マージンを完全に削除し、標準に近づける */
+    border-radius: 3px;
     transition: all 150ms ease-out;
 }
 
 .aio-window-list-aio-window-list-window-container {
-    padding-left: 28px;
-    /* 20px + 8px */
+    padding-left: 32px;
     align-items: center;
 }
 
 .aio-window-list-aio-window-list-window-title {
     font-size: 1em;
-    /* 標準サイズに戻す */
     color: rgba(255, 255, 255, 0.85);
 }
 
@@ -116,62 +133,61 @@
 }
 
 .aio-window-list-actions {
-    gap: 4px;
     align-items: center;
-}
-
-/* お気に入り星ボタン - 標準サイズ */
-.aio-window-list-star-button {
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
-    min-height: 24px;
-    padding: 2px;
-    border-radius: 6px;
-    transition: all 150ms ease-out;
-    background-color: transparent;
-    border: 1px solid transparent;
     display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
-.aio-window-list-star-button:hover {
+/* 間に挿入する透明なボックスのスタイル */
+.aio-action-spacer {
+    width: 20px;
+    height: 1px;
+    background-color: transparent;
+    flex-shrink: 0;
+}
+
+/* お気に入り星アイコンの新しいスタイル */
+.aio-window-list-star-icon {
+    icon-size: 14px;
+    /* ★変更: 星の大きさを16px（例: 20pxの0.8倍）に設定 */
+    color: rgba(255, 255, 255, 0.6);
+    transition: all 150ms ease-out;
+    padding: 6px;
+    border-radius: 4px;
+}
+
+.aio-window-list-star-icon:hover {
     color: #F9C23C;
     background-color: rgba(249, 194, 60, 0.15);
-    border-color: rgba(249, 194, 60, 0.3);
-    transform: scale(1.05);
 }
 
-.aio-window-list-star-button .aio-window-list-icon {
-    icon-size: 14px;
-}
-
-/* 閉じるボタン - 標準サイズ */
+/* 閉じるボタン */
 .aio-window-list-close-button {
-    width: 24px;
-    height: 24px;
-    min-width: 24px;
-    min-height: 24px;
-    padding: 2px;
-    border-radius: 5px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    margin: 0;
+    border-radius: 4px;
     color: transparent;
     transition: all 200ms ease-out;
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
     background-color: transparent;
-    border: 1px solid transparent;
+    border: none;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-/* ヘッダー（グループ）の閉じるボタン - より目立つスタイル */
+/* ヘッダー（グループ）の閉じるボタン */
 .aio-window-list-group-header .aio-window-list-close-button {
-    background-color: rgba(255, 107, 107, 0.1);
-    border: 1px solid rgba(255, 107, 107, 0.2);
-    border-radius: 8px;
+    width: 28px;
+    height: 28px;
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
 }
 
 .aio-window-list-group-header:hover .aio-window-list-close-button,
@@ -180,20 +196,19 @@
     visibility: visible;
     pointer-events: auto;
     color: #FF6B6B;
-    background-color: rgba(255, 107, 107, 0.2);
+    background-color: rgba(255, 107, 107, 0.1);
 }
 
 .aio-window-list-group-header .aio-window-list-close-button:hover {
     color: #FF4444;
-    background-color: rgba(255, 68, 68, 0.3);
-    transform: scale(1.1);
-    box-shadow: 0 2px 4px rgba(255, 107, 107, 0.3);
+    background-color: rgba(255, 68, 68, 0.2);
+    box-shadow: 0 2px 4px rgba(255, 107, 107, 0.2);
 }
 
-/* ウィンドウアイテムの閉じるボタン - よりシンプル */
+/* ウィンドウアイテムの閉じるボタン */
 .aio-window-list-window-item .aio-window-list-close-button {
     background-color: transparent;
-    border: 1px solid transparent;
+    border: none;
     border-radius: 4px;
 }
 
@@ -203,31 +218,24 @@
     visibility: visible;
     pointer-events: auto;
     color: rgba(255, 255, 255, 0.6);
-    border-color: rgba(255, 255, 255, 0.1);
 }
 
 .aio-window-list-window-item .aio-window-list-close-button:hover {
     color: #FF6B6B;
     background-color: rgba(255, 107, 107, 0.15);
-    transform: scale(1.05);
 }
 
-/* パネル上のウィンドウアイコンリスト */
+/* Panel上のウィンドウアイコンリスト */
 .aio-panel-window-icon {
-    icon-size: 20px;
+    icon-size: 24px;
 }
 
 .aio-window-icon-list-container {
-    spacing: 2px;
-    padding: 0 4px;
+    spacing: 5px;
+    padding: 0 6px;
 }
 
-/* パネルボタンのスタイル改善 - 標準サイズ */
-.aio-panel-button {
-    padding: 3px 5px;
-    border-radius: 6px;
-    transition: all 150ms ease-out;
-}
+
 
 .aio-panel-button:hover {
     background-color: rgba(255, 255, 255, 0.1);
@@ -252,11 +260,11 @@
 /* レスポンシブな調整 */
 @media (max-width: 1024px) {
     .aio-favorite-button {
-        padding: 2px 4px;
+        padding: 5px 6px;
     }
 
     .aio-window-list-item {
-        padding: 3px 6px;
+        padding: 6px 10px;
     }
 
     .panel-main-icon {
@@ -264,22 +272,20 @@
     }
 }
 
-/* グループ間の明確な区切り - 標準間隔 */
+/* グループ間のセパレータ */
 .aio-window-list-group-header:not(:first-child) {
-    margin-top: 4px;
-    /* 前のグループとの間隔を標準に */
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    /* 上部にも境界線 */
-    padding-top: 4px;
-    /* 上部のパディングも標準に */
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    margin-top: 8px;
+    /* セパレータの上マージンは維持 */
+    padding-top: 8px;
 }
 
 /* 最初のヘッダー項目 */
 .aio-window-list-group-header:first-child {
-    margin-top: 2px;
+    margin-top: 0;
 }
 
 /* グループの最後のウィンドウアイテム後の間隔 */
 .aio-window-list-window-item:last-of-type {
-    margin-bottom: 2px;
+    margin-bottom: 0;
 }

@@ -754,13 +754,13 @@ const AppMenuButton = GObject.registerClass(
         }
 
         _flashIcon(color) {
-            if (this._isDestroyed || !this._panelIcon || this._panelIcon.is_destroyed) return;
-            const originalStyle = this._panelIcon.get_style();
-            this._panelIcon.set_style(`background-color: ${color};`);
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-                if (this._panelIcon && !this._panelIcon.is_destroyed) this._panelIcon.set_style(originalStyle);
-                return GLib.SOURCE_REMOVE;
-            });
+            // if (this._isDestroyed || !this._panelIcon || this._panelIcon.is_destroyed) return;
+            // const originalStyle = this._panelIcon.get_style();
+            // this._panelIcon.set_style(`background-color: ${color};`);
+            // GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            //     if (this._panelIcon && !this._panelIcon.is_destroyed) this._panelIcon.set_style(originalStyle);
+            //     return GLib.SOURCE_REMOVE;
+            // });
         }
 
         _initializeMenuStructure() {
@@ -929,6 +929,8 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedIndex = newIndex;
         }
 
+        // extension.js の _updateFavoritesUnit 関数全体
+
         _updateFavoritesUnit(favoriteAppIds, selectedIndex) {
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
@@ -940,16 +942,18 @@ const AppMenuButton = GObject.registerClass(
                     can_focus: false
                 });
 
-                const favoritesBox = new St.BoxLayout({
+                // 新しいコンテナ構造を作成
+                const topLevelFavoritesBox = new St.BoxLayout({
                     x_expand: true,
-                    style_class: 'aio-favorites-bar'
+                    style_class: 'aio-favorites-bar-container', // 新しいクラス名（既存と合わせる）
+                    // 内部で justify-content: space-between を適用するためにflexコンテナにする
+                    // CSSで設定されているので、JS側では不要
                 });
+                this._favoritesContainer.add_child(topLevelFavoritesBox);
 
-                this._favoritesContainer.add_child(favoritesBox);
-
-                // お気に入りボタン群
-                const favoritesGroup = new St.BoxLayout({
-                    style_class: 'aio-favorites-group'
+                // お気に入りボタン群を格納する左側のコンテナ
+                const favoritesGroupContainer = new St.BoxLayout({
+                    style_class: 'aio-favorites-group', // 既存のクラス名
                 });
 
                 for (const [index, appId] of favoriteAppIds.entries()) {
@@ -959,7 +963,6 @@ const AppMenuButton = GObject.registerClass(
                     const button = new St.Button({
                         child: new St.Icon({
                             gicon: app.get_icon(),
-                            // icon_size: 28, ← 削除！CSSで制御
                             style_class: 'aio-favorite-icon'
                         }),
                         style_class: 'aio-favorite-button',
@@ -977,14 +980,18 @@ const AppMenuButton = GObject.registerClass(
 
                     addTooltip(button, app.get_name());
                     this._favoriteButtons[index] = button;
-                    favoritesGroup.add_child(button);
+                    favoritesGroupContainer.add_child(button);
                 }
+
+                // ★追加：Settingsアイコンを右端に押し込むための可変スペーサー
+                const settingsSpacer = new St.Widget({ x_expand: true, x_align: Clutter.ActorAlign.FILL });
+                topLevelFavoritesBox.add_child(favoritesGroupContainer);
+                topLevelFavoritesBox.add_child(settingsSpacer);
 
                 // 設定ボタン
                 const settingsButton = new St.Button({
                     child: new St.Icon({
                         icon_name: 'preferences-system-symbolic',
-                        // icon_size: 20, ← 削除！CSSで制御
                         style_class: 'aio-settings-icon'
                     }),
                     style_class: 'aio-settings-button',
@@ -998,8 +1005,7 @@ const AppMenuButton = GObject.registerClass(
 
                 addTooltip(settingsButton, 'Settings');
 
-                favoritesBox.add_child(favoritesGroup);
-                favoritesBox.add_child(settingsButton);
+                topLevelFavoritesBox.add_child(settingsButton);
 
                 if (this.menu.numMenuItems > 0) {
                     this.menu.box.insert_child_at_index(this._favoritesContainer.actor, 0);
@@ -1010,8 +1016,6 @@ const AppMenuButton = GObject.registerClass(
                 this._updateFavoriteSelection(selectedIndex);
             }
         }
-
-
         _openSettings() {
             this._extension.openPreferences();
             this.menu.close();
@@ -1020,6 +1024,8 @@ const AppMenuButton = GObject.registerClass(
         _sortWindowGroups(windowGroups, favoriteAppIds) {
             return _sortUsingCommonRules(windowGroups, favoriteAppIds, group => group.app.get_id());
         }
+
+        // extension.js の _updateWindowsUnit 関数全体
 
         _updateWindowsUnit(windowGroups, favoriteAppIds) {
             this._windowItemsMap.clear();
@@ -1054,11 +1060,25 @@ const AppMenuButton = GObject.registerClass(
                     const actionsContainer = new St.BoxLayout({ style_class: 'aio-window-list-actions' });
                     if (this._isAppLaunchable(group.app)) {
                         const isFavorite = favoriteAppIds.includes(group.app.get_id());
-                        const starIcon = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
-                        const starButton = new St.Button({ style_class: 'aio-window-list-star-button', child: new St.Icon({ icon_name: starIcon, style_class: 'aio-window-list-icon' }) });
-                        starButton.connect('clicked', () => { this._extension._toggleFavorite(group.app.get_id()); });
-                        actionsContainer.add_child(starButton);
+                        const starIconName = isFavorite ? 'starred-symbolic' : 'non-starred-symbolic';
+                        // ★変更：St.Buttonではなく直接St.Iconを作成
+                        const starIcon = new St.Icon({ icon_name: starIconName, style_class: 'aio-window-list-star-icon' });
+                        starIcon.set_reactive(true); // クリック可能にする
+                        starIcon.set_can_focus(false); // フォーカス不可にする
+                        starIcon.connect('button-press-event', (actor, event) => { // button-press-eventでクリックを処理
+                            if (event.get_button() === 1) { // 左クリックの場合
+                                this._extension._toggleFavorite(group.app.get_id());
+                                return Clutter.EVENT_STOP; // イベント伝播を停止
+                            }
+                            return Clutter.EVENT_PROPAGATE; // その他は伝播
+                        });
+                        addTooltip(starIcon, 'Toggle Favorite'); // アイコンに直接ツールチップを追加
+                        actionsContainer.add_child(starIcon); // 直接アイコンを追加
                     }
+                    // 物理的に透明なボックスを間に配置
+                    const spacer = new St.Widget({ style_class: 'aio-action-spacer' });
+                    actionsContainer.add_child(spacer);
+
                     const groupCloseButton = new St.Button({ style_class: 'aio-window-list-close-button', child: new St.Icon({ icon_name: 'window-close-symbolic' }) });
                     groupCloseButton.connect('clicked', () => headerItem.emit('custom-close'));
                     actionsContainer.add_child(groupCloseButton);
