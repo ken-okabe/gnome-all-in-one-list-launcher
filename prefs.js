@@ -5,6 +5,8 @@ import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk';
 import GObject from 'gi://GObject';
+import GLib from 'gi://GLib';
+
 
 import {
     ExtensionPreferences,
@@ -69,8 +71,25 @@ const ICON_LIST = [
 ];
 
 
+// ★★★ ここから追加 ★★★
+// ListStoreでアイコンとラベルを扱うためのGObjectクラス
+const IconListItem = GObject.registerClass(
+    class IconListItem extends GObject.Object {
+        _init(label, value) {
+            super._init();
+            this._label = label;
+            this._value = value;
+        }
+        get label() { return this._label; }
+        get value() { return this._value; }
+    }
+);
+// ★★★ 追加ここまで ★★★
+
+
 const KeybindingDialog = GObject.registerClass(
     class KeybindingDialog extends Gtk.Dialog {
+        // ... (KeybindingDialogのコードは変更なし) ...
         _init(params) {
             super._init({
                 ...params,
@@ -257,7 +276,73 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         this._activeConnections = [];
     }
 
+    // ★★★ ここから追加 ★★★
+    // アイコン付きドロップダウンを生成するヘルパー関数
+    _createVisualIconDropdown() {
+        const listStore = new Gio.ListStore({ item_type: IconListItem });
+        ICON_LIST.forEach(item => {
+            listStore.append(new IconListItem(item.label, item.value));
+        });
+
+        // ドロップダウンの各行を生成するファクトリ
+        const factory = new Gtk.BuilderListItemFactory({
+            // ★★★ ここが修正箇所 ★★★
+            bytes: GLib.Bytes.new(new TextEncoder().encode(`
+                <interface>
+                  <template class="GtkListItem">
+                    <property name="child">
+                      <object class="GtkBox">
+                        <property name="orientation">0</property>
+                        <property name="spacing">12</property>
+                        <child>
+                          <object class="GtkImage">
+                            <binding name="icon-name">
+                              <lookup name="value" type="IconListItem"><lookup name="item">GtkListItem</lookup></lookup>
+                            </binding>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                             <property name="xalign">0</property>
+                             <binding name="label">
+                               <lookup name="label" type="IconListItem"><lookup name="item">GtkListItem</lookup></lookup>
+                             </binding>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </template>
+                </interface>
+            `)),
+            // ★★★ 修正ここまで ★★★
+        });
+
+        const dropdown = new Adw.ComboRow({
+            title: _('Main Panel Icon'),
+            subtitle: _('Choose an icon for the main button on the panel'),
+            model: listStore,
+            factory: factory,
+            list_factory: factory,
+        });
+
+        // 設定値とドロップダウンの選択状態を同期させる
+        const currentIconValue = this._settings.get_string('main-panel-icon');
+        const currentIndex = ICON_LIST.findIndex(item => item.value === currentIconValue);
+        dropdown.set_selected(currentIndex > -1 ? currentIndex : 0);
+
+        dropdown.connect('notify::selected-item', () => {
+            const selected = dropdown.selected_item;
+            if (selected) {
+                this._settings.set_string('main-panel-icon', selected.value);
+            }
+        });
+
+        return dropdown;
+    }
+    // ★★★ 追加ここまで ★★★
+
     _buildFavoritesPage() {
+        // ... (このメソッドは変更なし) ...
         const page = new Adw.PreferencesPage({ title: _('Favorites'), icon_name: 'starred-symbolic' });
 
         const mainShortcutGroup = new Adw.PreferencesGroup({ title: _('Main Action Shortcut') });
@@ -351,6 +436,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _addAvailableKeysContent(expanderRow) {
+        // ... (このメソッドは変更なし) ...
         const boxStyle = {
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 8,
@@ -401,6 +487,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _moveFavoriteItem(oldIndex, newIndex) {
+        // ... (このメソッドは変更なし) ...
         const oldFavorites = this._favoritesSettings.get_strv('favorite-apps');
         const oldShortcuts = Array.from({ length: MAX_FAVORITES }, (_, i) => this._settings.get_strv(`shortcut-${i}`));
         const shortcutMap = new Map(oldFavorites.map((appId, i) => [appId, oldShortcuts[i]]));
@@ -412,6 +499,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _buildActionsPage() {
+        // ... (このメソッドは変更なし) ...
         const page = new Adw.PreferencesPage({ title: _('Actions'), icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic' });
 
         const favGroup = new Adw.PreferencesGroup({ title: _('Favorites Bar (In Popup Menu)') });
@@ -468,6 +556,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _createShortcutRow(parent, title, settingKey, targetName = null) {
+        // ... (このメソッドは変更なし) ...
         const row = title ? new Adw.ActionRow({ title }) : parent;
         if (title) parent.add(row);
 
@@ -557,23 +646,11 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const iconsGroup = new Adw.PreferencesGroup({ title: _('Icons') });
         page.add(iconsGroup);
 
-        // 1. Main Panel Icon Selector
-        const iconModelLabels = ICON_LIST.map(item => `${item.category}: ${item.label}`);
-        const mainIconRow = new Adw.ComboRow({
-            title: _('Main Panel Icon'),
-            subtitle: _('Choose an icon for the main button on the panel'),
-            model: Gtk.StringList.new(iconModelLabels),
-        });
-        const currentIconValue = this._settings.get_string('main-panel-icon');
-        const currentIconIndex = ICON_LIST.findIndex(item => item.value === currentIconValue);
-        mainIconRow.set_selected(currentIconIndex > -1 ? currentIconIndex : 0);
-        mainIconRow.connect('notify::selected', () => {
-            const selected = ICON_LIST[mainIconRow.get_selected()];
-            if (selected) {
-                this._settings.set_string('main-panel-icon', selected.value);
-            }
-        });
+        // ★★★ ここからが変更箇所 ★★★
+        // 1. Main Panel Icon Selector (Visual)
+        const mainIconRow = this._createVisualIconDropdown();
         iconsGroup.add(mainIconRow);
+        // ★★★ 変更ここまで ★★★
 
         // 2. Show Window Icon List on Panel (Moved)
         const showWindowIconListRow = new Adw.SwitchRow({
@@ -595,20 +672,18 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const otherOptionsGroup = new Adw.PreferencesGroup({ title: _('Other Options') });
         page.add(otherOptionsGroup);
 
-        // ★★★ ここから追加 ★★★
+        // Hide Activities Button
         const hideActivitiesSwitch = new Adw.SwitchRow({
-            title: 'Hide Activities Button',
-            subtitle: 'Hides the default "Activities" button in the top left corner',
+            title: _('Hide Activities Button'),
+            subtitle: _('Hides the default "Activities" button in the top left corner'),
         });
         otherOptionsGroup.add(hideActivitiesSwitch);
-
         this._settings.bind(
             'hide-activities-button',
             hideActivitiesSwitch,
             'active',
             Gio.SettingsBindFlags.DEFAULT
         );
-        // ★★★ 追加ここまで ★★★
 
         const forceHideOverviewRow = new Adw.SwitchRow({
             title: _('Hide Overview at Start-up'),
@@ -621,6 +696,7 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
     }
 
     _buildAboutPage() {
+        // ... (このメソッドは変更なし) ...
         const page = new Adw.PreferencesPage({ title: _('About'), icon_name: 'help-about-symbolic' });
         const infoGroup = new Adw.PreferencesGroup({ title: _('Information') });
         page.add(infoGroup);

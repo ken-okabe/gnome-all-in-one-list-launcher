@@ -1606,6 +1606,7 @@ export default class MinimalTimelineExtension extends Extension {
         return targetIndex; // 見つからない場合は-1が返される
     }
 
+    // 競合状態を修正した_applyFocusIntent
     _applyFocusIntent() {
         const appToFocus = this.toBeFocusedNewTimeline.at(Now);
         const indexCloseToFocus = this.toBeFocusedIndexCloseTimeline.at(Now);
@@ -1620,6 +1621,11 @@ export default class MinimalTimelineExtension extends Extension {
         this.toBeFocusedIndexActivateTimeline.define(Now, null);
 
         const focus = () => {
+            // ガード条件をコールバック関数の内部に移動
+            if (!this._appMenuButton || !this._appMenuButton.menu.isOpen) {
+                console.log(`[FocusDebug] focus(): Menu is not open. Aborting focus attempt.`);
+                return;
+            }
 
             if (appToFocus) {
                 const allWindowItems = this._appMenuButton._windowsContainer.filter(item => item && item._itemType === 'window');
@@ -1630,7 +1636,6 @@ export default class MinimalTimelineExtension extends Extension {
                     const [win, timestamp] = item._itemData;
                     const itemApp = this._windowModel._windowTracker.get_window_app(win);
                     if (itemApp && itemApp.get_id() === appToFocus.get_id()) {
-                        console.log(`[FocusDebug] _applyFocusIntent: Found matching window with timestamp: ${timestamp}`);
                         if (timestamp > latestTimestamp) {
                             latestTimestamp = timestamp;
                             targetWindowItem = item;
@@ -1638,45 +1643,30 @@ export default class MinimalTimelineExtension extends Extension {
                     }
                 }
                 if (targetWindowItem) {
-                    console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus target window item with latest timestamp: ${latestTimestamp}`);
-
                     const targetIndex = this._getMenuItemIndex(targetWindowItem);
                     if (targetIndex !== -1) {
                         this._focusMenuItemByIndex(targetIndex);
                     }
-
-                } else {
-                    console.log(`[FocusDebug] _applyFocusIntent: No target window found for app: ${appToFocus.get_id()}`);
                 }
-
             } else if (indexCloseToFocus !== null && indexCloseToFocus >= 0) {
-                // ★★★ ここからが修正箇所 ★★★
                 const allItems = this._appMenuButton.menu._getMenuItems();
                 const focusableItems = allItems.filter(item => item && item.reactive);
-                // ★★★ 修正ここまで ★★★
-
 
                 if (focusableItems.length > 0) {
                     if (indexCloseToFocus > 0) {
                         const newFocusIndex = Math.min(indexCloseToFocus - 1, focusableItems.length - 1);
-                        console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at new index: ${newFocusIndex}`);
                         this._focusMenuItemByIndex(newFocusIndex);
                     } else {
-                        console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at new index: 0`);
                         this._focusMenuItemByIndex(0);
                     }
-                } else {
-                    console.log(`[FocusDebug] _applyFocusIntent: No focusable items found after closing.`);
                 }
             } else if (indexActivateToFocus !== null && indexActivateToFocus >= 0) {
-                console.log(`[FocusDebug] _applyFocusIntent: Attempting to focus item at index: ${indexActivateToFocus}`);
-
                 this._focusMenuItemByIndex(indexActivateToFocus);
             }
         };
 
-
-        setTimeout(focus, 300); // Delay to ensure the menu is fully done before focusing
+        // 遅延はUIの描画完了を待つために必要
+        setTimeout(focus, 100);
 
     }
 
@@ -1817,7 +1807,7 @@ export default class MinimalTimelineExtension extends Extension {
                         }
                     });
 
-        
+
 
                     return Timeline(null);
                 });
