@@ -1341,6 +1341,37 @@ const DateTimeClockManager = GObject.registerClass(
     }
 );
 
+// ★★★ 以下を新たに追加 ★★★
+const ActivitiesButtonManager = GObject.registerClass(
+    class ActivitiesButtonManager extends GObject.Object {
+        _init({ settings, createBooleanSettingTimeline }) {
+            super._init();
+            this._settings = settings;
+
+            // createBooleanSettingTimeline を外部から受け取る
+            const hideActivitiesButtonTimeline = createBooleanSettingTimeline(this._settings, 'hide-activities-button');
+
+            // .map() は、このクラスの生存期間中のみ有効
+            this._subscription = hideActivitiesButtonTimeline.map(shouldHide => {
+                const activitiesButton = Main.panel.statusArea.activities;
+                if (activitiesButton) {
+                    shouldHide ? activitiesButton.hide() : activitiesButton.show();
+                }
+            });
+        }
+
+        destroy() {
+            // .map()による購読を停止する必要はない（GSettingsの接続が切れるため）
+            // 状態を元に戻すクリーンアップ処理のみを実行
+            try {
+                if (Main.panel.statusArea.activities) {
+                    Main.panel.statusArea.activities.show();
+                }
+            } catch (e) { /* ignore */ }
+        }
+    }
+);
+
 // ★ メインクラス
 export default class MinimalTimelineExtension extends Extension {
     constructor(metadata) {
@@ -1352,6 +1383,8 @@ export default class MinimalTimelineExtension extends Extension {
         this._favsSettings = null;
         this._gsettingsConnections = [];
         this._dateTimeClockManager = null;
+        this._activitiesButtonManager = null;
+
 
         this._windowTimestamps = null;
         this.toBeFocusedNewTimeline = null;
@@ -1701,6 +1734,8 @@ export default class MinimalTimelineExtension extends Extension {
             }
         }
 
+
+
         this._lifecycleTimeline.bind(isEnabled => {
             if (isEnabled) {
                 // ▼変更▼
@@ -1728,6 +1763,11 @@ export default class MinimalTimelineExtension extends Extension {
 
                 this._dateTimeClockManager = new DateTimeClockManager();
                 this._dateTimeClockManager.manage(dateMenuPosTimeline, dateMenuRankTimeline);
+
+                this._activitiesButtonManager = new ActivitiesButtonManager({
+                    settings: settings,
+                    createBooleanSettingTimeline: this._createBooleanSettingTimeline.bind(this)
+                });
 
                 const posAndRankTimeline = combineLatestWith((pos, rank) => ({ pos, rank }))(mainIconPosTimeline)(mainIconRankTimeline);
                 const mainIconConfigTimeline = combineLatestWith((posAndRank, show) => ({ ...posAndRank, show }))(posAndRankTimeline)(showIconListTimeline);
@@ -1777,6 +1817,8 @@ export default class MinimalTimelineExtension extends Extension {
                         }
                     });
 
+        
+
                     return Timeline(null);
                 });
 
@@ -1793,6 +1835,9 @@ export default class MinimalTimelineExtension extends Extension {
                 this._windowModel = null;
                 this._dateTimeClockManager?.destroy();
                 this._dateTimeClockManager = null;
+
+                this._activitiesButtonManager?.destroy();
+                this._activitiesButtonManager = null;
             }
             return Timeline(null);
         });

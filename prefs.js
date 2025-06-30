@@ -595,8 +595,23 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         const otherOptionsGroup = new Adw.PreferencesGroup({ title: _('Other Options') });
         page.add(otherOptionsGroup);
 
+        // ★★★ ここから追加 ★★★
+        const hideActivitiesSwitch = new Adw.SwitchRow({
+            title: 'Hide Activities Button',
+            subtitle: 'Hides the default "Activities" button in the top left corner',
+        });
+        otherOptionsGroup.add(hideActivitiesSwitch);
+
+        this._settings.bind(
+            'hide-activities-button',
+            hideActivitiesSwitch,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        // ★★★ 追加ここまで ★★★
+
         const forceHideOverviewRow = new Adw.SwitchRow({
-            title: _('Force to Hide Overview at Start-up'),
+            title: _('Hide Overview at Start-up'),
             subtitle: _('Prevents the Activities Overview from showing automatically on login')
         });
         this._settings.bind('hide-overview-at-startup', forceHideOverviewRow, 'active', Gio.SettingsBindFlags.DEFAULT);

@@ -11,6 +11,7 @@
     <key name="main-panel-icon" type="s"><default>'open-menu-symbolic'</default></key>
     <key name="show-window-icon-list" type="b"><default>true</default></key>
     <key name="show-overview-button" type="b"><default>true</default></key>
+    <key name="hide-activities-button" type="b"><default>true</default></key>
 
     <key name="close-on-fav-launch" type="b"><default>false</default></key>
     <key name="close-on-list-activate" type="b"><default>false</default></key>
