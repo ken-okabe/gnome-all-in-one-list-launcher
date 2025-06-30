@@ -208,7 +208,28 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
 
         const mainShortcutGroup = new Adw.PreferencesGroup({ title: _('Main Action Shortcut') });
         page.add(mainShortcutGroup);
-        this._createShortcutRow(mainShortcutGroup, _('Open Popup Menu'), 'open-popup-shortcut');
+        // Bind to the renamed key 'main-shortcut'
+        this._createShortcutRow(mainShortcutGroup, _('Open Popup Menu'), 'main-shortcut');
+
+        // --- New ComboRow for main-shortcut-action ---
+        const actionValues = ['show-overview', 'close-popup'];
+        const actionLabels = [_('Show Overview'), _('Close Popup Menu')];
+
+        const shortcutActionRow = new Adw.ComboRow({
+            title: _('Action on Second Press'),
+            subtitle: _('Action when the shortcut is pressed again while the popup is open'),
+            model: Gtk.StringList.new(actionLabels),
+        });
+
+        const currentAction = this._settings.get_string('main-shortcut-action');
+        shortcutActionRow.set_selected(actionValues.indexOf(currentAction));
+
+        shortcutActionRow.connect('notify::selected', () => {
+            const selectedIndex = shortcutActionRow.get_selected();
+            this._settings.set_string('main-shortcut-action', actionValues[selectedIndex]);
+        });
+        mainShortcutGroup.add(shortcutActionRow);
+        // --- End of new ComboRow ---
 
         const favoritesGroup = new Adw.PreferencesGroup({
             title: _('Favorite Apps and Shortcuts'),

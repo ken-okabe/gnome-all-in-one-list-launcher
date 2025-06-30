@@ -649,7 +649,8 @@ const RunningAppsIndicator = GObject.registerClass(
 const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
         // ★ 修正: _selectedFavoriteIndexTimeline から _selectedFavoriteIdTimeline へ変更
-        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedIndexCloseTimeline, toBeFocusedIndexActivateTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, extension, settings }) {
+        // In class AppMenuButton
+        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedIndexCloseTimeline, toBeFocusedIndexActivateTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, mainShortcutActionTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
 
@@ -674,6 +675,7 @@ const AppMenuButton = GObject.registerClass(
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
             this._closeOnListCloseTimeline = closeOnListCloseTimeline;
+            this._mainShortcutActionTimeline = mainShortcutActionTimeline; // --- Add this line
 
             this._windowItemsMap = new Map();
             this._windowTitleConnections = new Map();
@@ -805,7 +807,20 @@ const AppMenuButton = GObject.registerClass(
             const symbol = event.get_key_symbol();
             if (this._isMenuCloseShortcut(symbol, event)) {
                 this._flashIcon('purple');
-                this.menu.close();
+
+                const action = this._mainShortcutActionTimeline.at(Now);
+
+                if (action === 'show-overview') {
+                    if (Main.overview.visible) {
+                        //Main.overview.hide(); // does not work here
+                    } else {
+                        this.menu.close();
+                        Main.overview.show();
+                    }
+                }
+                else {
+                    this.menu.close();
+                }
                 return Clutter.EVENT_STOP;
             }
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
@@ -834,7 +849,7 @@ const AppMenuButton = GObject.registerClass(
 
         _isMenuCloseShortcut(symbol, event) {
             const settings = this._extension.getSettings();
-            const shortcutKeys = settings.get_strv('open-popup-shortcut');
+            const shortcutKeys = settings.get_strv('main-shortcut');
             if (!shortcutKeys || shortcutKeys.length === 0) return false;
             const shortcutString = shortcutKeys[0];
             const parsedShortcut = this._parseShortcutString(shortcutString);
@@ -1305,7 +1320,11 @@ export default class MinimalTimelineExtension extends Extension {
     }
 
     _onOpenPopupShortcut() {
-        this._appMenuButton?.menu.open();
+        if (Main.overview.visible) {
+            //Main.overview.hide(); // does not work here
+        } else {
+            this._appMenuButton?.menu.open();
+        }
     }
 
     _onFavoriteShortcut(index) {
@@ -1581,6 +1600,7 @@ export default class MinimalTimelineExtension extends Extension {
 
     }
 
+    // In class MinimalTimelineExtension
     enable() {
         this._lifecycleTimeline = Timeline(true);
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
@@ -1636,7 +1656,7 @@ export default class MinimalTimelineExtension extends Extension {
 
         this._lifecycleTimeline.bind(isEnabled => {
             if (isEnabled) {
-                Main.wm.addKeybinding('open-popup-shortcut', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onOpenPopupShortcut.bind(this));
+                Main.wm.addKeybinding('main-shortcut', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onOpenPopupShortcut.bind(this));
                 for (let i = 0; i < 30; i++) {
                     Main.wm.addKeybinding(`shortcut-${i}`, settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onFavoriteShortcut.bind(this, i));
                 }
@@ -1665,6 +1685,7 @@ export default class MinimalTimelineExtension extends Extension {
                     const closeOnFavLaunchTimeline = this._createBooleanSettingTimeline(settings, 'close-on-fav-launch');
                     const closeOnListActivateTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-activate');
                     const closeOnListCloseTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-close');
+                    const mainShortcutActionTimeline = this._createStringSettingTimeline(settings, 'main-shortcut-action');
 
                     this._appMenuButton = new AppMenuButton({
                         windowsTimeline: this._windowModel.windowsTimeline,
@@ -1677,6 +1698,7 @@ export default class MinimalTimelineExtension extends Extension {
                         closeOnFavLaunchTimeline: closeOnFavLaunchTimeline,
                         closeOnListActivateTimeline: closeOnListActivateTimeline,
                         closeOnListCloseTimeline: closeOnListCloseTimeline,
+                        mainShortcutActionTimeline: mainShortcutActionTimeline,
                         extension: this,
                         settings: settings,
                     });
@@ -1699,7 +1721,7 @@ export default class MinimalTimelineExtension extends Extension {
                 });
 
             } else {
-                Main.wm.removeKeybinding('open-popup-shortcut');
+                Main.wm.removeKeybinding('main-shortcut');
                 for (let i = 0; i < 30; i++) { Main.wm.removeKeybinding(`shortcut-${i}`); }
                 this._appMenuButton?.destroy();
                 this._appMenuButton = null;

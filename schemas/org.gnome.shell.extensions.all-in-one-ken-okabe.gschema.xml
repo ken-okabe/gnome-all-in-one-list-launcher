@@ -13,7 +13,8 @@
     <key name="close-on-list-activate" type="b"><default>false</default></key>
     <key name="close-on-list-close" type="b"><default>false</default></key>
 
-    <key name="open-popup-shortcut" type="as"><default>[]</default></key>
+    <key name="main-shortcut" type="as"><default>[]</default></key>
+    <key name="main-shortcut-action" type="s"><default>'show-overview'</default></key>
 
     <key name="shortcut-0" type="as"><default>[]</default></key>
     <key name="shortcut-1" type="as"><default>[]</default></key>
