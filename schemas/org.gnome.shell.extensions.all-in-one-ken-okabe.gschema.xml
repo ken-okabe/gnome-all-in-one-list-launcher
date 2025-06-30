@@ -6,8 +6,11 @@
     <key name="main-icon-rank" type="i"><default>0</default></key>
     <key name="date-menu-position" type="s"><default>'right'</default></key>
     <key name="date-menu-rank" type="i"><default>-1</default></key>
-    <key name="show-window-icon-list" type="b"><default>true</default></key>
     <key name="hide-overview-at-startup" type="b"><default>true</default></key>
+
+    <key name="main-panel-icon" type="s"><default>'open-menu-symbolic'</default></key>
+    <key name="show-window-icon-list" type="b"><default>true</default></key>
+    <key name="show-overview-button" type="b"><default>true</default></key>
 
     <key name="close-on-fav-launch" type="b"><default>false</default></key>
     <key name="close-on-list-activate" type="b"><default>false</default></key>

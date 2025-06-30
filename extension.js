@@ -650,12 +650,16 @@ const AppMenuButton = GObject.registerClass(
     class AppMenuButton extends PanelMenu.Button {
         // ★ 修正: _selectedFavoriteIndexTimeline から _selectedFavoriteIdTimeline へ変更
         // In class AppMenuButton
-        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedIndexCloseTimeline, toBeFocusedIndexActivateTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, mainShortcutActionTimeline, extension, settings }) {
+        // In class AppMenuButton
+        _init({ windowsTimeline, favoritesTimeline, toBeFocusedNewTimeline, toBeFocusedIndexCloseTimeline, toBeFocusedIndexActivateTimeline, redrawTimeline, closeOnFavLaunchTimeline, closeOnListActivateTimeline, closeOnListCloseTimeline, mainShortcutActionTimeline, mainPanelIconTimeline, showOverviewButtonTimeline, extension, settings }) {
             super._init(0.0, 'Timeline Event Network');
             this._isDestroyed = false;
 
-            // プロパティの初期化
-            this._panelIcon = new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'system-status-icon' });
+            // ▼変更▼
+            // プロパティの初期化 (メインアイコンを新しい設定から読み込む)
+            this._panelIcon = new St.Icon({ icon_name: settings.get_string('main-panel-icon'), style_class: 'system-status-icon' });
+            // ▲変更▲
+
             this.add_child(this._panelIcon);
             this._extension = extension;
             this._settings = settings;
@@ -675,7 +679,20 @@ const AppMenuButton = GObject.registerClass(
             this._closeOnFavLaunchTimeline = closeOnFavLaunchTimeline;
             this._closeOnListActivateTimeline = closeOnListActivateTimeline;
             this._closeOnListCloseTimeline = closeOnListCloseTimeline;
-            this._mainShortcutActionTimeline = mainShortcutActionTimeline; // --- Add this line
+
+            // ▼変更▼
+            // 新しいTimelineをプロパティとして保持
+            this._mainShortcutActionTimeline = mainShortcutActionTimeline;
+            this._mainPanelIconTimeline = mainPanelIconTimeline;
+            this._showOverviewButtonTimeline = showOverviewButtonTimeline;
+
+            // メインパネルアイコンが変更されたときに動的に更新する
+            this._mainPanelIconTimeline.map(iconName => {
+                if (this._panelIcon && !this._panelIcon.is_destroyed) {
+                    this._panelIcon.icon_name = iconName;
+                }
+            });
+            // ▲変更▲
 
             this._windowItemsMap = new Map();
             this._windowTitleConnections = new Map();
@@ -717,12 +734,21 @@ const AppMenuButton = GObject.registerClass(
 
             this._initializeMenuStructure();
 
-            // favoritesTimelineの更新を監視
-            this._favoritesTimeline.map(favoriteAppIds => {
+            // ★★★ 変更箇所 ★★★
+            // favoritesTimeline と showOverviewButtonTimeline を結合する
+            const favsAndOverviewTimeline = combineLatestWith(
+                (favs, show) => ({ favoriteAppIds: favs, showOverview: show })
+            )(this._favoritesTimeline)(this._showOverviewButtonTimeline);
+
+            // 結合したTimelineの更新を監視する
+            favsAndOverviewTimeline.map(({ favoriteAppIds, showOverview }) => {
                 if (this._isDestroyed) return;
-                // ★ 修正: 現在選択されているapp-idを渡す
+                // これで、お気に入りが変更された場合でも、
+                // Overviewボタンの表示設定が変更された場合でも、
+                // _updateFavoritesUnit が呼び出され、表示が正しく更新される。
                 this._updateFavoritesUnit(favoriteAppIds, this._selectedFavoriteIdTimeline.at(Now));
             });
+            // ★★★ 変更ここまで ★★★
 
             // ★ 修正: 選択されたapp-idの変更を監視してUIを更新
             this._selectedFavoriteIdTimeline.map(selectedId => {
@@ -801,6 +827,7 @@ const AppMenuButton = GObject.registerClass(
             }
         }
 
+        // In class AppMenuButton
         _onMenuKeyPress(actor, event) {
             this._extension.recoverFocusTimeline.define(Now, true);
             console.log(`[FocusDebug] recoverFocusTimeline triggered by key press BECAUSE possible focus recovery`);
@@ -808,8 +835,8 @@ const AppMenuButton = GObject.registerClass(
             if (this._isMenuCloseShortcut(symbol, event)) {
                 this._flashIcon('purple');
 
+                // ▼変更▼
                 const action = this._mainShortcutActionTimeline.at(Now);
-
                 if (action === 'show-overview') {
                     if (Main.overview.visible) {
                         //Main.overview.hide(); // does not work here
@@ -817,10 +844,11 @@ const AppMenuButton = GObject.registerClass(
                         this.menu.close();
                         Main.overview.show();
                     }
-                }
-                else {
+                } else { // 'close-popup' の場合
                     this.menu.close();
                 }
+                // ▲変更▲
+
                 return Clutter.EVENT_STOP;
             }
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
@@ -846,7 +874,6 @@ const AppMenuButton = GObject.registerClass(
             }
             return Clutter.EVENT_PROPAGATE;
         }
-
         _isMenuCloseShortcut(symbol, event) {
             const settings = this._extension.getSettings();
             const shortcutKeys = settings.get_strv('main-shortcut');
@@ -969,7 +996,7 @@ const AppMenuButton = GObject.registerClass(
             this._lastSelectedAppId = newSelectedId;
         }
 
-        // ★ 修正: UI構築とイベント接続をIDベースに
+        // In class AppMenuButton
         _updateFavoritesUnit(favoriteAppIds, selectedAppId) {
             this._favoritesContainer?.destroy();
             this._favoritesContainer = null;
@@ -980,6 +1007,26 @@ const AppMenuButton = GObject.registerClass(
                 const topLevelFavoritesBox = new St.BoxLayout({ x_expand: true, style_class: 'aio-favorites-bar-container' });
                 this._favoritesContainer.add_child(topLevelFavoritesBox);
                 const favoritesGroupContainer = new St.BoxLayout({ style_class: 'aio-favorites-group' });
+
+                // ▼変更▼
+                // "Show Overview Button"が有効な場合にボタンを追加
+                if (this._showOverviewButtonTimeline.at(Now)) {
+                    const overviewButton = new St.Button({
+                        child: new St.Icon({ icon_name: 'view-grid-symbolic', style_class: 'aio-favorite-icon' }),
+                        style_class: 'aio-favorite-button',
+                        can_focus: false,
+                        track_hover: true
+                    });
+                    overviewButton.connect('clicked', () => {
+                        Main.overview.show();
+                        this.menu.close();
+                    });
+                    favoritesGroupContainer.add_child(overviewButton);
+
+                    // お気に入りアイコンとの間に区切り線を追加
+                    favoritesGroupContainer.add_child(new St.Widget({ style_class: 'aio-favorites-separator' }));
+                }
+                // ▲変更▲
 
                 // ★ indexは不要になったが、可読性のために残す
                 for (const appId of favoriteAppIds) {
@@ -1656,7 +1703,10 @@ export default class MinimalTimelineExtension extends Extension {
 
         this._lifecycleTimeline.bind(isEnabled => {
             if (isEnabled) {
+                // ▼変更▼
                 Main.wm.addKeybinding('main-shortcut', settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onOpenPopupShortcut.bind(this));
+                // ▲変更▲
+
                 for (let i = 0; i < 30; i++) {
                     Main.wm.addKeybinding(`shortcut-${i}`, settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, this._onFavoriteShortcut.bind(this, i));
                 }
@@ -1665,11 +1715,16 @@ export default class MinimalTimelineExtension extends Extension {
                     windowTimestamps: this._windowTimestamps
                 });
 
+                // ▼変更▼
+                // 新しい設定のTimelineを作成
                 const mainIconPosTimeline = this._createStringSettingTimeline(settings, 'main-icon-position');
                 const mainIconRankTimeline = this._createIntSettingTimeline(settings, 'main-icon-rank');
                 const showIconListTimeline = this._createBooleanSettingTimeline(settings, 'show-window-icon-list');
                 const dateMenuPosTimeline = this._createStringSettingTimeline(settings, 'date-menu-position');
                 const dateMenuRankTimeline = this._createIntSettingTimeline(settings, 'date-menu-rank');
+                const mainPanelIconTimeline = this._createStringSettingTimeline(settings, 'main-panel-icon');
+                const showOverviewButtonTimeline = this._createBooleanSettingTimeline(settings, 'show-overview-button');
+                // ▲変更▲
 
                 this._dateTimeClockManager = new DateTimeClockManager();
                 this._dateTimeClockManager.manage(dateMenuPosTimeline, dateMenuRankTimeline);
@@ -1687,6 +1742,8 @@ export default class MinimalTimelineExtension extends Extension {
                     const closeOnListCloseTimeline = this._createBooleanSettingTimeline(settings, 'close-on-list-close');
                     const mainShortcutActionTimeline = this._createStringSettingTimeline(settings, 'main-shortcut-action');
 
+                    // ▼変更▼
+                    // 新しいTimelineをコンストラクタに渡す
                     this._appMenuButton = new AppMenuButton({
                         windowsTimeline: this._windowModel.windowsTimeline,
                         favoritesTimeline: favoritesTimeline,
@@ -1699,9 +1756,12 @@ export default class MinimalTimelineExtension extends Extension {
                         closeOnListActivateTimeline: closeOnListActivateTimeline,
                         closeOnListCloseTimeline: closeOnListCloseTimeline,
                         mainShortcutActionTimeline: mainShortcutActionTimeline,
+                        mainPanelIconTimeline: mainPanelIconTimeline,
+                        showOverviewButtonTimeline: showOverviewButtonTimeline,
                         extension: this,
                         settings: settings,
                     });
+                    // ▲変更▲
                     Main.panel.addToStatusArea(`${this.uuid}-AppMenuButton`, this._appMenuButton, rank, pos);
 
                     this._runningAppsIndicator = new RunningAppsIndicator({
@@ -1721,7 +1781,9 @@ export default class MinimalTimelineExtension extends Extension {
                 });
 
             } else {
+                // ▼変更▼
                 Main.wm.removeKeybinding('main-shortcut');
+                // ▲変更▲
                 for (let i = 0; i < 30; i++) { Main.wm.removeKeybinding(`shortcut-${i}`); }
                 this._appMenuButton?.destroy();
                 this._appMenuButton = null;

@@ -6,14 +6,68 @@ import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk';
 import GObject from 'gi://GObject';
 
-
-
 import {
     ExtensionPreferences,
     gettext as _,
 } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const MAX_FAVORITES = 30;
+
+// A helper structure for the icon list
+const ICON_LIST = [
+    { category: `General & Menu`, label: `Menu (Hamburger)`, value: `open-menu-symbolic` },
+    { category: `General & Menu`, label: `Grid (9 Dots)`, value: `view-app-grid-symbolic` },
+    { category: `General & Menu`, label: `Grid (4 Squares)`, value: `view-grid-symbolic` },
+    { category: `General & Menu`, label: `View List`, value: `view-list-symbolic` },
+    { category: `General & Menu`, label: `Arrow Down`, value: `go-down-symbolic` },
+    { category: `General & Menu`, label: `Arrow Up`, value: `go-up-symbolic` },
+    { category: `General & Menu`, label: `More (Ellipsis)`, value: `view-more-symbolic` },
+    { category: `General & Menu`, label: `Drag Handle`, value: `drag-handle-symbolic` },
+    { category: `System & Places`, label: `Preferences`, value: `preferences-system-symbolic` },
+    { category: `System & Places`, label: `Home`, value: `user-home-symbolic` },
+    { category: `System & Places`, label: `Computer`, value: `computer-symbolic` },
+    { category: `System & Places`, label: `Start Here`, value: `start-here-symbolic` },
+    { category: `System & Places`, label: `Terminal`, value: `utilities-terminal-symbolic` },
+    { category: `System & Places`, label: `Security`, value: `security-high-symbolic` },
+    { category: `System & Places`, label: `Hard Disk`, value: `drive-harddisk-symbolic` },
+    { category: `System & Places`, label: `Trash`, value: `user-trash-full-symbolic` },
+    { category: `System & Places`, label: `Folder (Open)`, value: `folder-open-symbolic` },
+    { category: `Symbols & Status`, label: `Star (Filled)`, value: `starred-symbolic` },
+    { category: `Symbols & Status`, label: `Star (Empty)`, value: `non-starred-symbolic` },
+    { category: `Symbols & Status`, label: `Bookmark`, value: `bookmark-new-symbolic` },
+    { category: `Symbols & Status`, label: `Information`, value: `info-symbolic` },
+    { category: `Symbols & Status`, label: `Help`, value: `help-about-symbolic` },
+    { category: `Symbols & Status`, label: `Warning`, value: `dialog-warning-symbolic` },
+    { category: `Symbols & Status`, label: `Error`, value: `dialog-error-symbolic` },
+    { category: `Symbols & Status`, label: `Process Completed`, value: `process-completed-symbolic` },
+    { category: `Symbols & Status`, label: `Weather Clear`, value: `weather-clear-symbolic` },
+    { category: `Symbols & Status`, label: `Weather Storm`, value: `weather-storm-symbolic` },
+    { category: `Symbols & Status`, label: `Lightbulb`, value: `idea-symbolic` },
+    { category: `Actions`, label: `Search`, value: `edit-find-symbolic` },
+    { category: `Actions`, label: `Target / Locate`, value: `find-location-symbolic` },
+    { category: `Actions`, label: `Refresh`, value: `view-refresh-symbolic` },
+    { category: `Actions`, label: `Add`, value: `list-add-symbolic` },
+    { category: `Actions`, label: `Remove`, value: `list-remove-symbolic` },
+    { category: `Actions`, label: `Edit`, value: `document-edit-symbolic` },
+    { category: `Actions`, label: `Save`, value: `document-save-symbolic` },
+    { category: `Actions`, label: `Send`, value: `mail-send-symbolic` },
+    { category: `Actions`, label: `Exit`, value: `application-exit-symbolic` },
+    { category: `Actions`, label: `Zoom In`, value: `zoom-in-symbolic` },
+    { category: `Actions`, label: `Zoom Out`, value: `zoom-out-symbolic` },
+    { category: `Devices & Network`, label: `Speakers`, value: `audio-speakers-symbolic` },
+    { category: `Devices & Network`, label: `Camera`, value: `camera-photo-symbolic` },
+    { category: `Devices & Network`, label: `Brightness`, value: `display-brightness-symbolic` },
+    { category: `Devices & Network`, label: `Network Wired`, value: `network-wired-symbolic` },
+    { category: `Devices & Network`, label: `Network Wireless`, value: `network-wireless-symbolic` },
+    { category: `Devices & Network`, label: `Bluetooth`, value: `bluetooth-active-symbolic` },
+    { category: `Toggles & Checks`, label: `Checkbox`, value: `checkbox-checked-symbolic` },
+    { category: `Toggles & Checks`, label: `Radio Button`, value: `radio-checked-symbolic` },
+    { category: `Toggles & Checks`, label: `Toggle On`, value: `toggle-on-symbolic` },
+    { category: `Toggles & Checks`, label: `Toggle Off`, value: `toggle-off-symbolic` },
+    { category: `Toggles & Checks`, label: `Unavailable`, value: `action-unavailable-symbolic` },
+    { category: `Toggles & Checks`, label: `Pointer`, value: `object-select-symbolic` },
+];
+
 
 const KeybindingDialog = GObject.registerClass(
     class KeybindingDialog extends Gtk.Dialog {
@@ -208,28 +262,36 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
 
         const mainShortcutGroup = new Adw.PreferencesGroup({ title: _('Main Action Shortcut') });
         page.add(mainShortcutGroup);
-        // Bind to the renamed key 'main-shortcut'
+
         this._createShortcutRow(mainShortcutGroup, _('Open Popup Menu'), 'main-shortcut');
 
-        // --- New ComboRow for main-shortcut-action ---
         const actionValues = ['show-overview', 'close-popup'];
         const actionLabels = [_('Show Overview'), _('Close Popup Menu')];
-
         const shortcutActionRow = new Adw.ComboRow({
             title: _('Action on Second Press'),
             subtitle: _('Action when the shortcut is pressed again while the popup is open'),
             model: Gtk.StringList.new(actionLabels),
         });
-
         const currentAction = this._settings.get_string('main-shortcut-action');
         shortcutActionRow.set_selected(actionValues.indexOf(currentAction));
-
         shortcutActionRow.connect('notify::selected', () => {
-            const selectedIndex = shortcutActionRow.get_selected();
-            this._settings.set_string('main-shortcut-action', actionValues[selectedIndex]);
+            this._settings.set_string('main-shortcut-action', actionValues[shortcutActionRow.get_selected()]);
         });
         mainShortcutGroup.add(shortcutActionRow);
-        // --- End of new ComboRow ---
+
+        // Add static info row for Escape key
+        const escapeInfoRow = new Adw.ActionRow({
+            title: _('Close Popup Menu / Overview'),
+            subtitle: _('Press Escape key to close Popup menu and Overview.'),
+            activatable: false
+        });
+        const escapeLabel = new Gtk.Label({
+            label: '<b>Escape</b>',
+            use_markup: true,
+            css_classes: ['heading']
+        });
+        escapeInfoRow.add_suffix(escapeLabel);
+        mainShortcutGroup.add(escapeInfoRow);
 
         const favoritesGroup = new Adw.PreferencesGroup({
             title: _('Favorite Apps and Shortcuts'),
@@ -447,11 +509,12 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
 
     _buildDisplayPage() {
         const page = new Adw.PreferencesPage({ title: _('Display'), icon_name: 'video-display-symbolic' });
+
+        // Group for Panel Item Positions
         const displayGroup = new Adw.PreferencesGroup({ title: _('Panel Item Positions') });
         page.add(displayGroup);
 
         const positions = ['left', 'center', 'right'];
-
         const indicatorPosRow = new Adw.ComboRow({
             title: _('Main Icon Group Position'),
             subtitle: _('Position of the main icon and the window icon list'),
@@ -490,15 +553,47 @@ export default class AllWindowsPreferences extends ExtensionPreferences {
         this._settings.bind('date-menu-rank', dateMenuRankRow, 'value', Gio.SettingsBindFlags.DEFAULT);
         displayGroup.add(dateMenuRankRow);
 
-        const otherOptionsGroup = new Adw.PreferencesGroup({ title: _('Other Options') });
-        page.add(otherOptionsGroup);
+        // New Group for Icons
+        const iconsGroup = new Adw.PreferencesGroup({ title: _('Icons') });
+        page.add(iconsGroup);
 
+        // 1. Main Panel Icon Selector
+        const iconModelLabels = ICON_LIST.map(item => `${item.category}: ${item.label}`);
+        const mainIconRow = new Adw.ComboRow({
+            title: _('Main Panel Icon'),
+            subtitle: _('Choose an icon for the main button on the panel'),
+            model: Gtk.StringList.new(iconModelLabels),
+        });
+        const currentIconValue = this._settings.get_string('main-panel-icon');
+        const currentIconIndex = ICON_LIST.findIndex(item => item.value === currentIconValue);
+        mainIconRow.set_selected(currentIconIndex > -1 ? currentIconIndex : 0);
+        mainIconRow.connect('notify::selected', () => {
+            const selected = ICON_LIST[mainIconRow.get_selected()];
+            if (selected) {
+                this._settings.set_string('main-panel-icon', selected.value);
+            }
+        });
+        iconsGroup.add(mainIconRow);
+
+        // 2. Show Window Icon List on Panel (Moved)
         const showWindowIconListRow = new Adw.SwitchRow({
             title: _('Show Window Icon List on Panel'),
             subtitle: _('Displays open window icons next to the main indicator')
         });
         this._settings.bind('show-window-icon-list', showWindowIconListRow, 'active', Gio.SettingsBindFlags.DEFAULT);
-        otherOptionsGroup.add(showWindowIconListRow);
+        iconsGroup.add(showWindowIconListRow);
+
+        // 3. Show Overview Button in Popup (New)
+        const showOverviewButtonRow = new Adw.SwitchRow({
+            title: _('Show Overview Button in Popup'),
+            subtitle: _('Displays a button to open the Activities Overview in the popup menu')
+        });
+        this._settings.bind('show-overview-button', showOverviewButtonRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        iconsGroup.add(showOverviewButtonRow);
+
+        // Group for Other Options
+        const otherOptionsGroup = new Adw.PreferencesGroup({ title: _('Other Options') });
+        page.add(otherOptionsGroup);
 
         const forceHideOverviewRow = new Adw.SwitchRow({
             title: _('Force to Hide Overview at Start-up'),

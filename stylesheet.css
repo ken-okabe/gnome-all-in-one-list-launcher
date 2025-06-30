@@ -23,6 +23,8 @@
 
 /* Settings アイコンを右端に配置 */
 .aio-settings-button {
+    margin-left: 16px;
+
     padding: 3px 6px;
     border-radius: 8px;
     transition: all 150ms ease-out;
@@ -48,6 +50,10 @@
     border: 1px solid rgba(74, 144, 226, 0.5);
 }
 
+.aio-favorites-separator {
+    /* 左右に4pxのマージンを追加して間隔を確保 */
+    margin: 0 6px;
+}
 
 /* ヘッダー項目 - フォントサイズとスペーシング改善 */
 .aio-window-list-item .aio-window-list-icon {
