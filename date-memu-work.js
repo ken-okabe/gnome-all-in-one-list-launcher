@@ -336,7 +336,6 @@ export default class MinimalTimelineExtension extends Extension {
         this._mainLifecycleManager = null;
         this._favsSettings = null;
         this._gsettingsDisconnectFuncs = [];
-        this._windowTimestamps = null;
         this.toBeFocusedNewTimeline = null;
         this.toBeFocusedIndexCloseTimeline = null;
         this.toBeFocusedIndexActivateTimeline = null;
@@ -357,10 +356,6 @@ export default class MinimalTimelineExtension extends Extension {
         this._lifecycleTimeline = null;
         log('[AIO-LIFECYCLE] Extension disabled. All resources should be cleaned up.');
     }
-
-    // =====================================================================
-    // === _initializeMainLifecycle メソッド (thisコンテキスト修正版) ===
-    // =====================================================================
     _initializeMainLifecycle() {
         const settings = this.getSettings();
         this._favsSettings = new Gio.Settings({ schema_id: 'org.gnome.shell' });
@@ -377,37 +372,29 @@ export default class MinimalTimelineExtension extends Extension {
             // 副作用管理 ゾーン
             // =================================================
 
-            // --- 1. ウィンドウリストの監視 (旧 WindowModel) ---
+            // --- 1. ウィンドウリストの監視 ---
             const windowsTimeline = Timeline([]);
-
-            // ★ 修正点1: _windowTimestampsをクラスのプロパティではなく、ローカル変数として定義
             const windowTimestamps = new Map();
-
             const signalConnections = [];
             const connectSignal = (source, signalName, callback) => {
+                if (!source) return;
                 const handlerId = source.connect(signalName, callback);
                 signalConnections.push([source, handlerId]);
             };
-
             const _updateWindowList = () => {
                 const workspace = global.workspace_manager.get_active_workspace();
                 let windows = global.display.get_tab_list(Meta.TabList.NORMAL_ALL, workspace);
-                windows = windows.filter(win => win.get_compositor_private() && !win.is_skip_taskbar());
-
-                // ★ 修正点2: this._windowTimestamps の代わりにローカル変数 windowTimestamps を参照
+                windows = windows.filter(win => {
+                    try {
+                        return win && !win.is_override_redirect() && win.get_compositor_private() && win.get_window_type() !== Meta.WindowType.DESKTOP && !win.is_skip_taskbar();
+                    } catch (e) { return false; }
+                });
                 windows.forEach(win => {
-                    if (!windowTimestamps.has(win.get_id())) {
-                        windowTimestamps.set(win.get_id(), Date.now());
-                    }
+                    if (!windowTimestamps.has(win.get_id())) { windowTimestamps.set(win.get_id(), Date.now()); }
                 });
-                windows.sort((a, b) => {
-                    const aTime = windowTimestamps.get(a.get_id()) || 0;
-                    const bTime = windowTimestamps.get(b.get_id()) || 0;
-                    return bTime - aTime;
-                });
+                windows.sort((a, b) => (windowTimestamps.get(b.get_id()) || 0) - (windowTimestamps.get(a.get_id()) || 0));
                 windowsTimeline.define(Now, windows);
             };
-
             _updateWindowList();
             connectSignal(Shell.AppSystem.get_default(), 'app-state-changed', _updateWindowList);
             connectSignal(global.window_manager, 'switch-workspace', _updateWindowList);
@@ -417,19 +404,74 @@ export default class MinimalTimelineExtension extends Extension {
             connectSignal(Main.overview, 'hiding', _updateWindowList);
             log('[AIO-LIFECYCLE] Window-related signals connected.');
 
-            // ... (他のセットアップ処理は変更なし) ...
+            // --- 2. キーバインド設定 ---
             const keybindingNames = ['main-shortcut', ...Array.from({ length: 30 }, (_, i) => `shortcut-${i}`)];
             const keybindingCallbacks = [this._onOpenPopupShortcut.bind(this), ...Array.from({ length: 30 }, (_, i) => this._onFavoriteShortcut.bind(this, i))];
             keybindingNames.forEach((name, i) => { Main.wm.addKeybinding(name, settings, Meta.KeyBindingFlags.NONE, Shell.ActionMode.NORMAL, keybindingCallbacks[i]); });
             log('[AIO-LIFECYCLE] Keybindings registered.');
 
+            // --- 3. 時計の位置管理 (修正版) ---
             const dateMenu = Main.panel.statusArea.dateMenu;
-            const originalDateMenuParent = dateMenu?.get_parent();
-            if (dateMenu) { /* ... (変更なし) ... */ }
+            let originalDateMenuParent = null;
+            let originalDateMenuIndex = -1;
 
+            if (dateMenu) {
+                // 元の位置を保存
+                originalDateMenuParent = dateMenu.container.get_parent();
+                if (originalDateMenuParent) {
+                    const children = originalDateMenuParent.get_children();
+                    originalDateMenuIndex = children.indexOf(dateMenu.container);
+                }
+
+                const dateMenuPosTimeline = this._createStringSettingTimeline(settings, 'date-menu-position').timeline;
+                const dateMenuRankTimeline = this._createIntSettingTimeline(settings, 'date-menu-rank').timeline;
+
+                const dateMenuCombinedTimeline = combineLatestWith((pos, rank) => ({ pos, rank }))(dateMenuPosTimeline)(dateMenuRankTimeline);
+                dateMenuCombinedTimeline.bind(({ pos, rank }) => {
+                    // 現在のparentから削除
+                    const currentParent = dateMenu.container.get_parent();
+                    if (currentParent) {
+                        currentParent.remove_child(dateMenu.container);
+                    }
+
+                    // 新しい位置に配置（addToStatusAreaは使わない）
+                    let targetBox;
+                    switch (pos) {
+                        case 'left':
+                            targetBox = Main.panel._leftBox;
+                            break;
+                        case 'right':
+                            targetBox = Main.panel._rightBox;
+                            break;
+                        case 'center':
+                        default:
+                            targetBox = Main.panel._centerBox;
+                            break;
+                    }
+
+                    if (targetBox) {
+                        const numChildren = targetBox.get_n_children();
+                        const insertIndex = Math.min(rank, numChildren);
+                        targetBox.insert_child_at_index(dateMenu.container, insertIndex);
+                    }
+                });
+                log('[AIO-LIFECYCLE] DateMenu position management started.');
+            }
+
+            // --- 4. Activitiesボタン管理 (旧 ActivitiesButtonManager) ---
             const activitiesButton = Main.panel.statusArea.activities;
-            if (activitiesButton) { /* ... (変更なし) ... */ }
+            const originalActivitiesButtonVisible = activitiesButton?.visible;
+            if (activitiesButton) {
+                const hideTimeline = this._createBooleanSettingTimeline(settings, 'hide-activities-button').timeline;
+                hideTimeline.bind(hide => {
+                    if (activitiesButton) {
+                        activitiesButton.visible = !hide;
+                    }
+                });
+                log('[AIO-LIFECYCLE] ActivitiesButton visibility management started.');
+            }
 
+            // --- 5. メインUIのライフサイクル管理 ---
             this.toBeFocusedNewTimeline = Timeline(null);
             this.toBeFocusedIndexCloseTimeline = Timeline(null);
             this.toBeFocusedIndexActivateTimeline = Timeline(null);
@@ -439,6 +481,7 @@ export default class MinimalTimelineExtension extends Extension {
             const mainIconPosTimeline = this._createStringSettingTimeline(settings, 'main-icon-position').timeline;
             const mainIconRankTimeline = this._createIntSettingTimeline(settings, 'main-icon-rank').timeline;
             const showIconListTimeline = this._createBooleanSettingTimeline(settings, 'show-window-icon-list').timeline;
+
             this._createMainIconLifecycle(mainIconPosTimeline, mainIconRankTimeline, showIconListTimeline, settings, windowsTimeline);
 
             // =================================================
@@ -450,25 +493,34 @@ export default class MinimalTimelineExtension extends Extension {
                 log('[AIO-LIFECYCLE] Window-related signals disconnected.');
                 keybindingNames.forEach(name => Main.wm.removeKeybinding(name));
                 log('[AIO-LIFECYCLE] Keybindings removed.');
-                if (dateMenu && dateMenu.container.get_parent()) { dateMenu.container.get_parent().remove_child(dateMenu.container); }
-                if (originalDateMenuParent && dateMenu) { originalDateMenuParent.add_child(dateMenu.container); }
-                log('[AIO-LIFECYCLE] DateMenu position restored.');
-                if (activitiesButton) { activitiesButton.visible = true; }
+
+                // dateMenuの位置を元に戻す
+                if (dateMenu && originalDateMenuParent) {
+                    const currentParent = dateMenu.container.get_parent();
+                    if (currentParent && currentParent !== originalDateMenuParent) {
+                        currentParent.remove_child(dateMenu.container);
+                        if (originalDateMenuIndex >= 0) {
+                            originalDateMenuParent.insert_child_at_index(dateMenu.container, originalDateMenuIndex);
+                        } else {
+                            originalDateMenuParent.add_child(dateMenu.container);
+                        }
+                    }
+                    log('[AIO-LIFECYCLE] DateMenu position restored.');
+                }
+
+                if (activitiesButton) { activitiesButton.visible = originalActivitiesButtonVisible; }
                 log('[AIO-LIFECYCLE] ActivitiesButton visibility restored.');
                 this._gsettingsDisconnectFuncs.forEach(disconnect => disconnect());
                 this._gsettingsDisconnectFuncs = [];
                 log('[AIO-LIFECYCLE] GSettings connections disconnected.');
                 cleanupAllTooltips();
                 this._favsSettings = null;
-                // this._windowTimestampsはもう存在しないのでクリーンアップ不要
                 log('[AIO-LIFECYCLE] Top-level cleanup finished.');
             };
 
             return createResource({ /* dummy */ }, cleanup);
         });
     }
-
-
     _createGenericSettingTimeline(settings, key, getter) {
         const timeline = Timeline(getter(key));
         const connectionId = settings.connect(`changed::${key}`, () => {
@@ -486,7 +538,11 @@ export default class MinimalTimelineExtension extends Extension {
 
     _createMainIconLifecycle(posTimeline, rankTimeline, showListTimeline, settings, windowsTimeline) {
         log('[AIO-LIFECYCLE] Initializing Main Icon Lifecycle...');
-        const configTimeline = combineLatestWith((pos, rank, show) => ({ pos, rank, show }))(posTimeline, rankTimeline, showListTimeline);
+
+        // 3つのタイムラインを段階的に組み合わせる
+        const posRankTimeline = combineLatestWith((pos, rank) => ({ pos, rank }))(posTimeline)(rankTimeline);
+        const configTimeline = combineLatestWith((posRank, show) => ({ ...posRank, show }))(posRankTimeline)(showListTimeline);
+
         configTimeline.bind(({ pos, rank, show }) => {
             log(`[AIO-LIFECYCLE] CONFIG_CHANGED -> pos: ${pos}, rank: ${rank}, showList: ${show}`);
             log('[AIO-LIFECYCLE] bind: Automatically destroying previous UI components (if any)...');
@@ -517,8 +573,6 @@ export default class MinimalTimelineExtension extends Extension {
             const managedResources = { appMenuButton, runningAppsIndicator };
             log('[AIO-LIFECYCLE] bind: New UI components created and added to panel.');
 
-            // bindはリソースを返すことで自動的にクリーンアップを試みる（timeline.jsの実装による）
-            // 明示的なクリーンアップ関数を渡す場合はcreateResourceを使う
             return createResource(managedResources, () => {
                 log('[AIO-LIFECYCLE] Cleanup for UI components starting...');
                 try {
