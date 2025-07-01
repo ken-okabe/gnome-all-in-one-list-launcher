@@ -4,7 +4,8 @@ import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
+// Extensionクラスはもう不要
+// import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { Timeline, Now } from './timeline.js';
 
@@ -12,60 +13,62 @@ const log = (message) => {
     // console.log(`[AIO-Validator] ${message}`);
 };
 
-class AIOValidatorExtension extends Extension {
-    constructor(metadata) {
-        super(metadata);
+// ★★★★★ 修正の核心部分 ★★★★★
+// GNOME Shellが呼び出すエントリーポイント。これがファクトリ関数となる。
+export default function () {
 
-        this._indicator = null;
-        this._lifecycle = Timeline(false);
+    // --- 状態管理 ---
+    // `this`のプロパティではなく、クロージャで管理されるローカル変数。
+    // `enable`と`disable`はこのスコープを共有するため、永続的にアクセスできる。
+    let indicator = null;
+    const lifecycle = Timeline(false);
 
-        // timeline.jsの思想の核心：
-        // ライフサイクルの状態 (true/false) の変化を `map` を使って購読し、
-        // 状態に応じて副作用（UIの生成/破棄）を命令的に実行する。
-        // これにより、リアクティブなデータフローと命令的なUI管理が完全に同期する。
-        this._lifecycle
-            .distinctUntilChanged() // 重複した状態変更は無視する
-            .map(isEnabled => {
-                log(`Lifecycle state changed to: ${isEnabled}`);
-                if (isEnabled) {
-                    // --- 状態が `true` になった時の処理 ---
-                    if (this._indicator === null) {
-                        log('State is TRUE: Creating indicator...');
-                        this._indicator = new PanelMenu.Button(0.5, 'AIO Validator');
-                        const icon = new St.Icon({
-                            icon_name: 'system-run-symbolic',
-                            style_class: 'system-status-icon',
-                        });
-                        this._indicator.add_child(icon);
-                        Main.panel.addToStatusArea(this.uuid, this._indicator);
-                        log('Indicator created.');
-                    }
-                } else {
-                    // --- 状態が `false` になった時の処理 ---
-                    if (this._indicator !== null) {
-                        log('State is FALSE: Destroying indicator...');
-                        this._indicator.destroy();
-                        this._indicator = null;
-                        log('Indicator destroyed.');
-                    }
+    // --- 副作用の定義 ---
+    // 状態の変化を監視し、UIを同期させる永続的な購読
+    lifecycle
+        .distinctUntilChanged()
+        .map(isEnabled => {
+            log(`Lifecycle state changed to: ${isEnabled}`);
+            if (isEnabled) {
+                if (indicator === null) {
+                    log('State is TRUE: Creating indicator...');
+                    indicator = new PanelMenu.Button(0.5, 'AIO Validator');
+                    const icon = new St.Icon({
+                        icon_name: 'system-run-symbolic',
+                        style_class: 'system-status-icon',
+                    });
+                    indicator.add_child(icon);
+                    // `this.uuid`は使えないが、通常はmetadataから取得・保持する
+                    // ここでは固定文字列で代替
+                    Main.panel.addToStatusArea('aio-validator-uuid', indicator);
+                    log('Indicator created.');
                 }
-            });
-    }
+            } else {
+                if (indicator !== null) {
+                    log('State is FALSE: Destroying indicator...');
+                    indicator.destroy();
+                    indicator = null;
+                    log('Indicator destroyed.');
+                }
+            }
+        });
 
-    enable() {
-        // ライフサイクルの「真実のソース」に `true` を定義する。
-        // これが `map` への唯一の入力となる。
+    // --- GNOME Shellに渡すAPI ---
+    // `this`に依存しない、ただの関数。
+    function enable() {
         log('enable() called: Defining state to TRUE.');
-        this._lifecycle.define(Now, true);
+        lifecycle.define(Now, true);
     }
 
-    disable() {
-        // ライフサイクルの「真実のソース」に `false` を定義する。
+    function disable() {
         log('disable() called: Defining state to FALSE.');
-        this._lifecycle.define(Now, false);
+        lifecycle.define(Now, false);
     }
-}
 
-export default function (metadata) {
-    return new AIOValidatorExtension(metadata);
+    // `enable`と`disable`メソッドを持つオブジェクトを返す。
+    // これがGNOME Shellの要求する拡張機能のインターフェースとなる。
+    return {
+        enable,
+        disable,
+    };
 }
