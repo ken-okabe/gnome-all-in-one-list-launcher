@@ -1,91 +1,75 @@
+// =====================================================================
+// === Final Reference Code for Documentation (修正版) ===
+// =====================================================================
+
+import GLib from 'gi://GLib';
+import St from 'gi://St';
+import Clutter from 'gi://Clutter';
+
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import GLib from 'gi://GLib'; // +++ ADDED: Import GLib for idle_add
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+
 import { Timeline, Now, createResource } from './timeline.js';
+import { manageFavorites } from './component/ui0/manageFavorites.js';
+import { manageDynamicItems } from './component/ui1/manageDynamicItems.js';
 
-import manageAppMenuButton from './component/ui0/manageAppMenuButton.js';
-import manageFavBar from './component/ui0/manageFavBar.js';
-import managePanelIcons from './component/ui1/managePanelIcons.js';
+// Simple namespaced logger.
+const log = (message) => {
+    console.log(`[AIO-Validator] ${message}`);
+};
 
 // =====================================================================
-// === Main Extension Logic (Composer / Assembler) ===
+// === Main Extension Logic ===
 // =====================================================================
+// This is the main class for the GNOME Shell extension.
 export default function AIOValidatorExtension(metadata) {
-    const log = (message) => {
-        console.log(`[AIO-Validator] ${message}`);
-    };
-
+    // The master switch for the extension's lifecycle (true: enabled, false: disabled).
     const lifecycleTimeline = Timeline(false);
 
-    lifecycleTimeline.using(isEnabled => {
-        if (!isEnabled) {
-            return null;
-        }
-
-        log('BRIDGE: Creating UI components from factories...');
-
-        const appMenuButtonManager = manageAppMenuButton();
-        const panelIconsManager = managePanelIcons();
-
-        const panelMenuButton = appMenuButtonManager.instance;
-        const mainBox = appMenuButtonManager.mainBox;
-        const panelIcons = panelIconsManager.instance;
-
-        const favBarManager = manageFavBar(mainBox);
-        appMenuButtonManager.setFavBar(favBarManager); // Inject favBar controls into appMenuButtonManager
-
-
-        // --- THE DEFINITIVE FIX for the race condition ---
-        // This variable will hold the ID of our deferred task.
-        let idleAddId = 0;
-
-        // DEFER ASSEMBLY: Defer adding widgets to the panel.
-        // This gives the shell time to process pending layout changes, avoiding conflicts.
-        idleAddId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            // This code runs after the shell has processed pending layout changes.
-            if (panelMenuButton.is_destroyed || panelIcons.is_destroyed) {
-                // In case the extension was disabled again very quickly.
-                idleAddId = 0;
-                return GLib.SOURCE_REMOVE;
+    lifecycleTimeline
+        .distinctUntilChanged()
+        .using(isEnabled => {
+            if (!isEnabled) {
+                return null;
             }
 
-            // TODO: Make position configurable via GSettings (e.g., 'left', 'center', 'right').
-            // For now, default to the left box to fix the allocation issue.
-            const targetPanelBox = Main.panel._leftBox;
-            targetPanelBox.add_child(panelIcons);
+            // --- UI SETUP ---
+            log('BRIDGE: Creating top-level UI...');
+            const panelMenuButton = new PanelMenu.Button(0.5, 'FP AppMenu');
+            panelMenuButton.add_child(new St.Icon({ icon_name: 'view-app-grid-symbolic' }));
 
-            // The AppMenuButton is always added to the status area (right box).
+            const mainBox = new St.BoxLayout({ vertical: true, style: 'spacing: 8px; padding: 8px;' });
+            panelMenuButton.menu.box.add_child(mainBox);
+
+            const favLabel = new St.Label({ text: 'Favorites' });
+            const favBox = new St.BoxLayout({ style: 'spacing: 8px;' });
+            mainBox.add_child(favLabel);
+            mainBox.add_child(favBox);
+
+            const demoLabel = new St.Label({ text: 'Focusable List Demo' });
+            const demoBox = new St.BoxLayout({ style: 'spacing: 8px;' });
+            mainBox.add_child(demoLabel);
+            mainBox.add_child(demoBox);
+
+            const favoritesManager = manageFavorites(favBox);
+            const dynamicItemsManager = manageDynamicItems(demoBox);
+
             Main.panel.addToStatusArea(metadata.uuid, panelMenuButton);
+            log('BRIDGE: Top-level UI created.');
 
-            idleAddId = 0; // Reset the ID after execution.
-            return GLib.SOURCE_REMOVE; // Ensures this runs only once.
+            // --- TEARDOWN LOGIC ---
+            const cleanup = () => {
+                log('BRIDGE: Destroying top-level UI...');
+                favoritesManager.dispose();
+                dynamicItemsManager.dispose();
+                panelMenuButton.destroy();
+                log('BRIDGE: Top-level UI destroyed.');
+            };
+
+            return createResource(panelMenuButton, cleanup);
         });
 
-
-        log('BRIDGE: UI Assembly initiated.');
-
-        const cleanup = () => {
-            log('BRIDGE: Destroying top-level UI...');
-
-            // --- CRITICAL: Also clean up the deferred task if it hasn't run yet ---
-            if (idleAddId > 0) {
-                GLib.Source.remove(idleAddId);
-                idleAddId = 0;
-            }
-
-            favBarManager.dispose();
-            appMenuButtonManager.dispose();
-            panelIconsManager.dispose();
-            log('BRIDGE: Top-level UI destroyed.');
-        };
-
-        const topLevelUI = {
-            button: panelMenuButton,
-            icons: panelIcons,
-        };
-
-        return createResource(topLevelUI, cleanup);
-    });
-
+    // Public methods for GNOME Shell to control the lifecycle.
     this.enable = () => lifecycleTimeline.define(Now, true);
     this.disable = () => lifecycleTimeline.define(Now, false);
 }

@@ -25,6 +25,10 @@ export default GObject.registerClass({
     }
     vfunc_key_press_event(keyEvent) {
         const symbol = keyEvent.get_key_symbol();
+
+        console.log('[AIO-AppMenuButton] vfunc_key_press_event received key symbol:', symbol);
+
+
         if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) { return Clutter.EVENT_PROPAGATE; }
         if (symbol === Clutter.KEY_space) { this.emit('custom-activate'); return Clutter.EVENT_STOP; }
         else if (symbol === Clutter.KEY_BackSpace) { this.emit('custom-close'); return Clutter.EVENT_STOP; }
