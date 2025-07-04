@@ -2,6 +2,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import GLib from 'gi://GLib'; // +++ ADDED: Import GLib for idle_add
 import { Now } from '../../timeline.js';
 
 /**
