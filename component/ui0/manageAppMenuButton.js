@@ -56,8 +56,19 @@ export default function manageAppMenuButton() {
     // 4. Connect signals.
     appMenuButton.menu.connect('open-state-changed', (menu, isOpen) => {
         if (isOpen) {
-            console.log('[AIO-AppMenuButton] Menu opened, grabbing key focus for the menu actor.');
+            console.log('[AIO-AppMenuButton] Menu opened, attempting to grab key focus for the menu actor.');
             menu.actor.grab_key_focus();
+
+            // --- ADDED: Verify that the focus grab was successful ---
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                const focusedActor = global.stage.get_key_focus();
+                if (focusedActor === menu.actor) {
+                    console.log('[AIO-AppMenuButton] Focus grab SUCCESSFUL. Focus is on menu actor.');
+                } else {
+                    console.error(`[AIO-AppMenuButton] Focus grab FAILED. Focus is on: ${focusedActor}`);
+                }
+                return GLib.SOURCE_REMOVE;
+            });
         }
     });
     appMenuButton.menu.actor.connect('key-press-event', onKeyPress);
