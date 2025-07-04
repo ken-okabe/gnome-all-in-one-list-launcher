@@ -7,7 +7,7 @@ import St from 'gi://St';
  */
 export default function managePanelIcons() {
     // 1. Create the UI widget directly. This is the point of "birth".
-    const iconsContainer = new St.BoxLayout({ style_class: 'panel-window-list' });
+    const iconsContainer = new St.BoxLayout({ style_class: 'panel-window-list', x_expand: true });
 
     // --- REMOVED: The side-effect of adding to the panel. ---
     // This is now handled by the main extension logic (the "assembler").
