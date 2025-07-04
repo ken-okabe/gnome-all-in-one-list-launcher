@@ -1,16 +1,16 @@
 import St from 'gi://St';
-import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 
 import { Timeline, Now } from '../../timeline.js';
 
 /**
  * A self-contained "using" component to manage the favorites bar.
+ * It is ONLY responsible for creating the UI and managing its own state.
+ * It returns controls for another component to use.
  * @param {St.BoxLayout} container - The parent container to add the UI to.
- * @param {Clutter.Actor} menuActor - The actor to attach key press events to.
- * @returns {{dispose: () => void}} - An object with a dispose method for cleanup.
+ * @returns {{dispose: () => void, selectedIndexTimeline: Timeline, flashSelectedItem: () => void}}
  */
-export default function manageFavBar(container, menuActor) {
+export default function manageFavBar(container) {
     const DUMMY_ITEM_COUNT = 7;
     const items = Array.from({ length: DUMMY_ITEM_COUNT });
 
@@ -55,38 +55,14 @@ export default function manageFavBar(container, menuActor) {
         });
     };
 
-    const onKeyPress = (actor, event) => {
-        const symbol = event.get_key_symbol();
-        console.log(`[AIO-FavBar] onKeyPress received key: ${Clutter.key_symbol_to_string(symbol)}`); // DEBUG LOG
-        let currentIndex = selectedIndexTimeline.at(Now);
-
-        if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
-            console.log(`[AIO-FavBar] Arrow key detected. Direction: ${symbol === Clutter.KEY_Left ? 'Left' : 'Right'}`); // DEBUG LOG
-            const direction = (symbol === Clutter.KEY_Left) ? -1 : 1;
-            const newIndex = (currentIndex + direction + DUMMY_ITEM_COUNT) % DUMMY_ITEM_COUNT;
-            selectedIndexTimeline.define(Now, newIndex);
-            return Clutter.EVENT_STOP;
-        }
-
-        if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) {
-            console.log('[AIO-FavBar] Enter key detected.'); // DEBUG LOG
-            flashSelectedItem();
-            return Clutter.EVENT_STOP;
-        }
-        console.log('[AIO-FavBar] Key not handled, propagating.'); // DEBUG LOG
-        return Clutter.EVENT_PROPAGATE;
-    };
-    const keyPressSignalId = menuActor.connect('key-press-event', onKeyPress);
-
     const dispose = () => {
-        if (keyPressSignalId > 0) {
-            menuActor.disconnect(keyPressSignalId);
-        }
-        // --- REMOVED ---
-        // The result of .map() is a timeline, not a disposable subscription.
-        // This line was incorrect and caused the error.
-        // selectionBinding.dispose();
+        // All resources are managed by parent components.
+        // favBarBox is destroyed when its parent (mainBox) is destroyed.
     };
 
-    return { dispose };
+    return {
+        dispose,
+        selectedIndexTimeline,
+        flashSelectedItem,
+    };
 }

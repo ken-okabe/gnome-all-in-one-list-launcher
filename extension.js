@@ -23,12 +23,16 @@ export default function AIOValidatorExtension(metadata) {
 
         log('BRIDGE: Creating UI components from factories...');
 
-        const panelIconsManager = managePanelIcons();
         const appMenuButtonManager = manageAppMenuButton();
+        const panelIconsManager = managePanelIcons();
 
-        const panelIcons = panelIconsManager.instance;
         const panelMenuButton = appMenuButtonManager.instance;
         const mainBox = appMenuButtonManager.mainBox;
+        const panelIcons = panelIconsManager.instance;
+
+        const favBarManager = manageFavBar(mainBox);
+        appMenuButtonManager.favBar = favBarManager; // Inject favBar controls into appMenuButtonManager
+
 
         // --- THE DEFINITIVE FIX for the race condition ---
         // This variable will hold the ID of our deferred task.
@@ -56,7 +60,6 @@ export default function AIOValidatorExtension(metadata) {
             return GLib.SOURCE_REMOVE; // Ensures this runs only once.
         });
 
-        const favBarManager = manageFavBar(mainBox, panelMenuButton.menu.actor);
 
         log('BRIDGE: UI Assembly initiated.');
 
