@@ -57,9 +57,11 @@ export default function manageFavBar(container, menuActor) {
 
     const onKeyPress = (actor, event) => {
         const symbol = event.get_key_symbol();
+        console.log(`[AIO-FavBar] onKeyPress received key: ${Clutter.key_symbol_to_string(symbol)}`); // DEBUG LOG
         let currentIndex = selectedIndexTimeline.at(Now);
 
         if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
+            console.log(`[AIO-FavBar] Arrow key detected. Direction: ${symbol === Clutter.KEY_Left ? 'Left' : 'Right'}`); // DEBUG LOG
             const direction = (symbol === Clutter.KEY_Left) ? -1 : 1;
             const newIndex = (currentIndex + direction + DUMMY_ITEM_COUNT) % DUMMY_ITEM_COUNT;
             selectedIndexTimeline.define(Now, newIndex);
@@ -67,9 +69,11 @@ export default function manageFavBar(container, menuActor) {
         }
 
         if (symbol === Clutter.KEY_Return || symbol === Clutter.KEY_KP_Enter) {
+            console.log('[AIO-FavBar] Enter key detected.'); // DEBUG LOG
             flashSelectedItem();
             return Clutter.EVENT_STOP;
         }
+        console.log('[AIO-FavBar] Key not handled, propagating.'); // DEBUG LOG
         return Clutter.EVENT_PROPAGATE;
     };
     const keyPressSignalId = menuActor.connect('key-press-event', onKeyPress);

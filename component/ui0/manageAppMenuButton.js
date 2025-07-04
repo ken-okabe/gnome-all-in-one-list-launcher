@@ -11,6 +11,15 @@ export default function manageAppMenuButton() {
     const appMenuButton = new PanelMenu.Button(0.5, 'FP AppMenu');
     appMenuButton.add_child(new St.Icon({ icon_name: 'view-app-grid-symbolic' }));
 
+    // --- ADDED: Explicitly grab focus when the menu opens to capture key events ---
+    // This replicates the behavior of the `grab_key_focus()` call in the dummy-mini version.
+    appMenuButton.menu.connect('open-state-changed', (menu, isOpen) => {
+        if (isOpen) {
+            console.log('[AIO-AppMenuButton] Menu opened, grabbing key focus for the menu actor.');
+            menu.actor.grab_key_focus();
+        }
+    });
+
     // 2. Create its internal structure.
     const mainBox = new St.BoxLayout({ vertical: true, style: 'spacing: 8px; padding: 8px;' });
     appMenuButton.menu.box.add_child(mainBox);
