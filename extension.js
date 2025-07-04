@@ -31,7 +31,7 @@ export default function AIOValidatorExtension(metadata) {
         const panelIcons = panelIconsManager.instance;
 
         const favBarManager = manageFavBar(mainBox);
-        appMenuButtonManager.favBar = favBarManager; // Inject favBar controls into appMenuButtonManager
+        appMenuButtonManager.setFavBar(favBarManager); // Inject favBar controls into appMenuButtonManager
 
 
         // --- THE DEFINITIVE FIX for the race condition ---
