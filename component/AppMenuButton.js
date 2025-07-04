@@ -34,7 +34,6 @@ export const AppMenuButton = GObject.registerClass(
             this._dynamicItemsContainer = null;
 
             this._initializeMenuStructure();
-            this._setupKeyHandling();
         }
 
         // ★ 成功要因: これが重要
@@ -91,15 +90,6 @@ export const AppMenuButton = GObject.registerClass(
             const symbol = event.get_key_symbol();
 
             if (symbol === Clutter.KEY_Left || symbol === Clutter.KEY_Right) {
-                // 左右キーの処理（成功実績のある構造）
-                const DUMMY_ITEM_COUNT = 7;
-                let currentIndex = this._selectedDummyIndexTimeline.at(Now) ?? 0;
-
-                const direction = (symbol === Clutter.KEY_Left) ? -1 : 1;
-                const newIndex = (currentIndex + direction + DUMMY_ITEM_COUNT) % DUMMY_ITEM_COUNT;
-
-                this._selectedDummyIndexTimeline.define(Now, newIndex);
-
                 // ★ 成功要因: 外部のTimelineに通知
                 this._keyPressTimeline.define(Now, symbol);
 
@@ -114,18 +104,6 @@ export const AppMenuButton = GObject.registerClass(
             // その他のキーは外部に委譲
             this._keyPressTimeline.define(Now, symbol);
             return Clutter.EVENT_PROPAGATE;
-        }
-
-        _setupKeyHandling() {
-            // 選択状態の変更を監視
-            this._selectedDummyIndexTimeline.map(selectedIndex => {
-                if (this._isDestroyed) return;
-                this._updateSelection(selectedIndex);
-            });
-        }
-
-        _updateSelection(newSelectedIndex) {
-            this._lastSelectedIndex = newSelectedIndex;
         }
 
         // 外部アクセス用メソッド
