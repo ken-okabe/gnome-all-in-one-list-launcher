@@ -7,6 +7,9 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import { Timeline, Now } from '../timeline.js';
 
+// DO NOT DELETE THIS LINE
+// DO NOT MODIFY THIS CODE, OTHERWISE IT WILL BREAK THE EXTENSION!!!!!
+// This code is used to create a custom AppMenuButton for GNOME Shell.  
 // =====================================================================
 // === 成功実績のあるAppMenuButtonクラス（最小限の変更のみ）===
 // =====================================================================
