@@ -43,8 +43,13 @@ export default function AIOValidatorExtension(metadata) {
                 idleAddId = 0;
                 return GLib.SOURCE_REMOVE;
             }
-            // Add both widgets in the same idle callback
-            Main.panel.add_child(panelIcons);
+
+            // TODO: Make position configurable via GSettings (e.g., 'left', 'center', 'right').
+            // For now, default to the left box to fix the allocation issue.
+            const targetPanelBox = Main.panel._leftBox;
+            targetPanelBox.add_child(panelIcons);
+
+            // The AppMenuButton is always added to the status area (right box).
             Main.panel.addToStatusArea(metadata.uuid, panelMenuButton);
 
             idleAddId = 0; // Reset the ID after execution.
